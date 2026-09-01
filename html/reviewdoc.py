@@ -651,6 +651,10 @@ CSS = r"""
   .rd-msg.claude .who{color:var(--accent)}
   .rd-msg .bd{font-size:14px;white-space:pre-wrap;line-height:1.55}
   .rd-draft{font-size:10px;font-weight:700;color:var(--warn);letter-spacing:.04em}
+  .rd-fold-btn{display:inline-flex;align-items:center;gap:5px;font:650 11.5px/1 inherit;
+    color:var(--accent);background:var(--card);border:1px solid var(--accent);
+    border-radius:999px;padding:4px 10px;cursor:pointer}
+  .rd-fold-btn:hover{background:var(--accent);color:#fff}
   .rd-acts{display:flex;gap:8px;margin-top:8px}
   .rd-acts button{background:none;border:none;color:var(--dim);cursor:pointer;font:600 12px/1 inherit;
     padding:2px 0;text-decoration:underline}
@@ -865,7 +869,8 @@ JS = r"""
             (t.status === 'resolved' ? '<span class="rd-st">✓ resolved</span>' : '') + '</div>';
     h += '<div class="tg"><span class="rd-chip">' + esc(label(t.tag)) + '</span>' +
          (t._draft ? '<span class="rd-draft">not exported</span>' : '') +
-         (t.status === 'resolved' ? '<span class="rd-draft" data-fold>▾</span>' : '') + '</div>';
+         (t.status === 'resolved' ? '<button type="button" class="rd-fold-btn" data-fold>' +
+            foldTxt(true, t.replies.length) + '</button>' : '') + '</div>';
     if(t.quote) h += '<blockquote>' + esc(t.quote) + '</blockquote>';
     h += msg('user', t.body, t._draft);
     t.replies.forEach(function(r){
@@ -880,8 +885,12 @@ JS = r"""
     d.addEventListener('click', function(e){
       var el = e.target;
       if(el.closest('.rd-rep')) return;
-      if(el.hasAttribute && el.hasAttribute('data-fold')){
-        e.stopPropagation(); d.classList.toggle('fold'); return;
+      var foldBtn = el.closest && el.closest('[data-fold]');
+      if(foldBtn){
+        e.stopPropagation();
+        d.classList.toggle('fold');
+        foldBtn.textContent = foldTxt(d.classList.contains('fold'), t.replies.length);
+        return;
       }
       if(el.hasAttribute && el.hasAttribute('data-reply')){
         e.stopPropagation();
@@ -907,6 +916,10 @@ JS = r"""
     return '<div class="rd-msg ' + who + '"><div class="who">' +
       (who === 'claude' ? 'Claude' : 'You') + (draft ? ' · draft' : '') +
       '</div><div class="bd">' + esc(body) + '</div></div>';
+  }
+  function foldTxt(folded, nrep){
+    if(!folded) return '▴ hide';
+    return '▾ show ' + (nrep === 1 ? '1 reply' : nrep + ' replies');
   }
 
   function render(){
