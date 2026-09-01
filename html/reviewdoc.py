@@ -1101,6 +1101,36 @@ JS = r"""
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(u); }, 1500);
   }
+  // Prefer a native save dialog (File System Access API) so notes can land in
+  // the project folder Claude is reading, not just ~/Downloads. Chrome remembers
+  // the last-used directory via the `id`. Falls back to a plain download when the
+  // API is missing or refuses (e.g. some file:// origins). Resolves to one of
+  // 'picked' | 'download' | 'cancel'.
+  function saveNotes(text, name){
+    if(window.showSaveFilePicker){
+      return (async function(){
+        var handle;
+        try{
+          handle = await window.showSaveFilePicker({
+            suggestedName: name, id: 'reviewdoc-notes',
+            types: [{description:'Notes JSON', accept:{'application/json':['.json']}}]
+          });
+        }catch(err){
+          if(err && err.name === 'AbortError') return 'cancel';
+          download(text, name, 'application/json'); return 'download';
+        }
+        try{
+          var w = await handle.createWritable();
+          await w.write(text); await w.close();
+          return 'picked';
+        }catch(err){
+          download(text, name, 'application/json'); return 'download';
+        }
+      })();
+    }
+    download(text, name, 'application/json');
+    return Promise.resolve('download');
+  }
   function toMd(){
     var ts = payload(), L = ['# Review notes — ' + DOC.title, '',
       'Source: `' + DOC.file + '`', 'Threads: **' + ts.length + '**', '', '---', ''];
@@ -1121,8 +1151,12 @@ JS = r"""
   panel.querySelector('[data-export]').addEventListener('click', function(){
     var ts = payload();
     if(!ts.length){ toast('Nothing to export yet'); return; }
-    download(JSON.stringify(ts, null, 1), DOC.slug + '-notes.json', 'application/json');
-    toast('Saved to Downloads — now tell Claude "notes exported"');
+    Promise.resolve(saveNotes(JSON.stringify(ts, null, 1), DOC.slug + '-notes.json'))
+      .then(function(how){
+        if(how === 'cancel') return;
+        toast((how === 'picked' ? 'Saved' : 'Saved to Downloads') +
+              ' — now tell Claude "notes exported"');
+      });
   });
   panel.querySelector('[data-copy]').addEventListener('click', function(){
     if(!payload().length){ toast('Nothing to copy yet'); return; }

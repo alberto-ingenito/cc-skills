@@ -10,9 +10,14 @@ markdown-ish `.md`; output is one HTML file that works over `file://` with no
 network. Notes live inside the HTML in a `<script id="rd-notes">` JSON block, so
 rebuilding never loses them and you can read and answer them from the CLI.
 
-Invoke as `python3 ~/.claude/skills/present-dense-plan/reviewdoc.py`. Put the `.md` and
-`.html` somewhere durable and project-adjacent (e.g. `~/.claude/plans/<name>.md`
-or a `docs/` folder), never in `/tmp`.
+Invoke as `python3 ~/.claude/skills/html/reviewdoc.py`. Put the `.md` and
+`.html` **in the current session's working directory** (the repo you were
+invoked in), or a `docs/` subfolder of it — never `/tmp`, and avoid
+`~/.claude/plans` or `~/Downloads`. The reason is the export round-trip: on
+macOS you frequently cannot read `~/Downloads` back, so the notes file must
+land somewhere inside a working directory. The "Export notes for Claude" button
+opens a native save dialog (Chrome remembers the last folder), so the user can
+point it at the doc's own folder and you read it straight from there.
 
 ## The loop
 
@@ -20,8 +25,9 @@ or a `docs/` folder), never in `/tmp`.
 reviewdoc.py new <name> --title "T"          # optional scaffold
 reviewdoc.py build <src.md> --open           # write it, open it, then STOP and wait
    ... user selects text, adds notes, presses "Export notes for Claude" ...
+   ... a native save dialog opens — user saves <slug>-notes.json into the doc's folder ...
    ... user says "done" / "notes exported" ...
-reviewdoc.py import <doc.html> ~/Downloads/<slug>-notes.json
+reviewdoc.py import <doc.html> <doc-folder>/<slug>-notes.json
 reviewdoc.py list <doc.html>                 # ids, tags, quotes, reply counts
 reviewdoc.py list <doc.html> --json          # exact bodies, read this before answering
 reviewdoc.py reply <doc.html> <id> "answer"  # add --resolve when it is settled
