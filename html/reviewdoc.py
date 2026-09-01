@@ -19,11 +19,15 @@ from html.parser import HTMLParser
 
 TAGS = {
     "question": "❓ Question",
+    "clarify": "\U0001f50d Clarify",
     "change": "✏️ Change this",
     "concern": "⚠️ Concern",
     "unclear": "\U0001f937 Don't understand",
     "agree": "\U0001f44d Agree",
 }
+
+# Tags that can be submitted without a note body (the quote alone is the ask).
+NO_BODY_TAGS = {"clarify"}
 NOTES_RE = re.compile(
     r'(<script id="rd-notes" type="application/json">)(.*?)(</script>)', re.S
 )
@@ -710,6 +714,7 @@ JS = r"""
   "use strict";
   var DOC = __DOC__;
   var TAGS = __TAGS__;
+  var NO_BODY_TAGS = __NO_BODY_TAGS__;
   var KEY = 'reviewdoc:' + DOC.slug;
 
   var embedded = [];
@@ -872,7 +877,7 @@ JS = r"""
          (t.status === 'resolved' ? '<button type="button" class="rd-fold-btn" data-fold>' +
             foldTxt(true, t.replies.length) + '</button>' : '') + '</div>';
     if(t.quote) h += '<blockquote>' + esc(t.quote) + '</blockquote>';
-    h += msg('user', t.body, t._draft);
+    if(t.body) h += msg('user', t.body, t._draft);
     t.replies.forEach(function(r){
       h += msg(r.author === 'claude' ? 'claude' : 'user', r.body, r._draft);
     });
@@ -1038,7 +1043,7 @@ JS = r"""
   ed.querySelector('[data-cancel]').addEventListener('click', closeEd);
   ed.querySelector('[data-save]').addEventListener('click', function(){
     var body = edText.value.trim();
-    if(!body){ edText.focus(); return; }
+    if(!body && NO_BODY_TAGS.indexOf(pendTag) < 0){ edText.focus(); return; }
     var n = { id:uid(), tag:pendTag, quote:pending ? pending.quote : '',
               sectionId:pending ? pending.sectionId : null,
               sectionTitle:pending ? pending.sectionTitle : 'General',
@@ -1211,6 +1216,7 @@ def render_html(src_text, out_name, old_notes):
             json.dumps({"slug": slug, "file": out_name, "title": title}, ensure_ascii=False),
         )
         .replace("__TAGS__", json.dumps(TAGS, ensure_ascii=False))
+        .replace("__NO_BODY_TAGS__", json.dumps(sorted(NO_BODY_TAGS)))
     )
     payload = json.dumps(notes, ensure_ascii=False, indent=1)
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e")

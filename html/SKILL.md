@@ -183,6 +183,9 @@ warn the user about this — just do not rely on it.
 
 ## Tags the user can apply
 
-`question` ❓, `change` ✏️, `concern` ⚠️, `unclear` 🤷, `agree` 👍. Treat
+`question` ❓, `clarify` 🔍, `change` ✏️, `concern` ⚠️, `unclear` 🤷, `agree` 👍. Treat
 `unclear` as a defect in your writing, not in their understanding: rewrite that
-passage in the source before rebuilding, and say so in the reply.
+passage in the source before rebuilding, and say so in the reply. `clarify` is a
+lightweight "expand on this" — the user can apply it to a highlight without
+typing a note body, so the quoted text alone is the ask; answer it in a reply
+like any other thread.
