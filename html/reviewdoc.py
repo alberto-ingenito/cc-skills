@@ -517,10 +517,12 @@ def reanchor(notes, sections):
 
 def normalise(n, i=0):
     n.setdefault("id", "n%d" % (i + 1))
-    n.setdefault("tag", "question")
+    n.setdefault("kind", "note")
+    n.setdefault("tag", "highlight" if n["kind"] == "highlight" else "question")
     n.setdefault("quote", "")
     n.setdefault("sectionId", None)
     n.setdefault("sectionTitle", "")
+    n.setdefault("context", "")
     n.setdefault("start", None)
     n.setdefault("body", "")
     n.setdefault("author", "user")
@@ -610,31 +612,65 @@ CSS = r"""
     border-radius:12px;padding:16px 20px;margin:0 0 30px;font-size:15px}
 
   /* ---------- review layer ---------- */
-  mark.rd-hl{background:color-mix(in srgb,var(--warn) 26%,transparent);color:inherit;
-    border-bottom:2px solid var(--warn);border-radius:2px;cursor:pointer;padding:0 1px}
-  mark.rd-hl:hover{background:color-mix(in srgb,var(--warn) 42%,transparent)}
-  mark.rd-hl.on{background:color-mix(in srgb,var(--warn) 60%,transparent)}
+  /* a commented passage reads as a link (accent underline); a plain highlight
+     is the marker-pen wash (amber, no rule) */
+  mark.rd-hl{background:color-mix(in srgb,var(--accent) 15%,transparent);color:inherit;
+    border-bottom:2px solid var(--accent);border-radius:2px;cursor:pointer;padding:0 1px}
+  mark.rd-hl:hover{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+  mark.rd-hl.on{background:color-mix(in srgb,var(--accent) 46%,transparent)}
   mark.rd-hl.done{background:none;border-bottom:2px dotted var(--dim)}
-  #rd-bar{position:absolute;z-index:60;display:none;transform:translate(-50%,-100%)}
+  mark.rd-hl.mk{background:color-mix(in srgb,var(--warn) 34%,transparent);border-bottom:none}
+  mark.rd-hl.mk:hover{background:color-mix(in srgb,var(--warn) 50%,transparent)}
+  mark.rd-hl.mk.on{background:color-mix(in srgb,var(--warn) 68%,transparent)}
+  /* inline code and fenced blocks carry an opaque background of their own, which
+     paints over the wash — drop it inside a mark so a highlight spanning
+     `a_variable` is not a line with gaps punched in it */
+  mark.rd-hl code,mark.rd-hl pre{background:none}
+  /* a panel reply can point at a section (§N) — flash it on arrival */
+  section.rd-sec{border-radius:14px;transition:background-color .35s ease,box-shadow .35s ease}
+  section.rd-sec.rd-flash{background-color:color-mix(in srgb,var(--accent) 11%,transparent);
+    box-shadow:0 0 0 12px color-mix(in srgb,var(--accent) 11%,transparent)}
+  #rd-bar{position:absolute;z-index:60;display:none;transform:translate(-50%,-100%);
+    gap:1px;background:var(--line);border-radius:9px;overflow:hidden;
+    box-shadow:0 4px 16px rgba(0,0,0,.35)}
   #rd-bar button{font:600 13px/1 inherit;background:var(--accent);color:#fff;border:none;
-    padding:9px 14px;border-radius:9px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+    padding:9px 13px;cursor:pointer}
+  #rd-bar button:hover{filter:brightness(1.12)}
   #rd-fab{position:fixed;right:18px;bottom:18px;z-index:55;display:none;align-items:center;gap:8px;
     background:var(--accent);color:#fff;border:none;border-radius:999px;padding:13px 19px;cursor:pointer;
     font:650 14px/1 inherit;box-shadow:0 6px 22px rgba(0,0,0,.35)}
   #rd-fab .n{background:rgba(255,255,255,.28);border-radius:999px;padding:2px 8px;font-size:12px}
   #rd-panel{position:fixed;top:0;right:0;bottom:0;width:var(--panw);z-index:70;
-    background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column}
+    background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;
+    transition:transform .22s ease}
   #rd-panel header{padding:14px 16px;margin:0;border:none;border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:10px}
   #rd-panel header b{font-size:15px;flex:1}
   #rd-panel .rd-list{flex:1;overflow:auto;padding:12px 14px}
   #rd-panel .rd-foot{padding:12px 14px;border-top:1px solid var(--line);display:grid;gap:7px}
-  .rd-filters{display:flex;gap:6px;padding:0 14px 12px}
-  .rd-filters button{flex:1;font:600 12.5px/1 inherit;background:var(--card2);color:var(--dim);
-    border:1px solid var(--line);border-radius:8px;padding:8px 6px;cursor:pointer}
-  .rd-filters button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .rd-tabs{display:flex;gap:6px;padding:0 14px 8px}
+  .rd-tabs button{flex:1;font:600 12.5px/1 inherit;background:var(--card2);color:var(--dim);
+    border:1px solid var(--line);border-radius:8px;padding:8px 6px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:6px}
+  .rd-tabs button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .rd-tabs .k{font-variant-numeric:tabular-nums;opacity:.75;font-size:11.5px}
+  .rd-only{display:flex;align-items:center;gap:7px;padding:0 15px 10px;
+    font-size:12.5px;color:var(--dim);cursor:pointer;user-select:none}
+  .rd-only input{accent-color:var(--accent);margin:0;cursor:pointer}
+  .rd-hlc{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:11px;
+    padding:10px 12px;margin-bottom:9px;background:var(--card2);cursor:pointer}
+  .rd-hlc.sel{border-color:var(--accent)}
+  .rd-hlc.gone{opacity:.6;border-left-style:dashed}
+  .rd-hlc .sec{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
+    margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
+  .rd-hlc blockquote{margin:0;padding:0;border:none;font-size:13.5px;line-height:1.5;
+    max-height:120px;overflow:hidden}
+  .rd-hlc .ctx{font-size:11.5px;color:var(--dim);font-style:italic;margin-top:7px}
   .rd-x{background:none;border:1px solid var(--line);color:var(--dim);border-radius:8px;
     width:30px;height:30px;cursor:pointer;font-size:16px;line-height:1;flex:0 0 auto;display:none}
+  .rd-hide{background:none;border:1px solid var(--line);color:var(--dim);border-radius:8px;
+    width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1;flex:0 0 auto}
+  .rd-hide:hover{color:var(--ink);border-color:var(--accent)}
   .rd-grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
     font-weight:700;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
   .rd-grp:first-child{margin-top:0}
@@ -646,14 +682,19 @@ CSS = r"""
   .rd-th .tg{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
   .rd-chip{font-size:12px;font-weight:650;padding:2px 8px;border-radius:999px;
     background:var(--card);border:1px solid var(--line)}
-  .rd-th blockquote{margin:0 0 9px;padding-left:10px;border-left:3px solid var(--warn);
+  .rd-th blockquote{margin:0 0 9px;padding-left:10px;border-left:3px solid var(--accent);
     color:var(--dim);font-size:13px;font-style:italic;max-height:96px;overflow:hidden}
   .rd-msg{border-left:3px solid var(--you);padding:0 0 0 10px;margin:0 0 9px}
   .rd-msg.claude{border-left-color:var(--accent)}
   .rd-msg .who{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
-    color:var(--you);margin-bottom:2px}
+    color:var(--you);margin-bottom:2px;display:flex;align-items:center;gap:8px}
   .rd-msg.claude .who{color:var(--accent)}
+  .rd-msg .who .sp{flex:1}
+  .rd-msg .who button{background:none;border:none;padding:0;cursor:pointer;color:var(--dim);
+    font:700 10px/1 inherit;letter-spacing:.05em;text-transform:uppercase;text-decoration:underline}
+  .rd-msg .who button:hover{color:var(--ink)}
   .rd-msg .bd{font-size:14px;white-space:pre-wrap;line-height:1.55}
+  .rd-msg .bd a{cursor:pointer}
   .rd-draft{font-size:10px;font-weight:700;color:var(--warn);letter-spacing:.04em}
   .rd-fold-btn{display:inline-flex;align-items:center;gap:5px;font:650 11.5px/1 inherit;
     color:var(--accent);background:var(--card);border:1px solid var(--accent);
@@ -669,7 +710,9 @@ CSS = r"""
   .rd-th.resolved{opacity:.55}
   .rd-th.resolved.fold blockquote,.rd-th.resolved.fold .rd-msg,.rd-th.resolved.fold .rd-acts,
   .rd-th.resolved.fold .rd-rep{display:none}
-  .rd-st{font-size:10.5px;font-weight:700;color:var(--good);letter-spacing:.05em}
+  .rd-st{font-size:10.5px;font-weight:700;color:var(--good);letter-spacing:.05em;
+    background:none;border:none;padding:0;cursor:pointer;font-family:inherit}
+  .rd-st:hover{text-decoration:underline}
   .rd-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
   .rd-tags button{font:600 12.5px/1 inherit;background:var(--card2);color:var(--ink);
     border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer}
@@ -678,7 +721,7 @@ CSS = r"""
     background:var(--card);border:1px solid var(--line);border-radius:15px;padding:16px;display:none;
     box-shadow:0 12px 40px rgba(0,0,0,.45)}
   #rd-ed.open{display:block}
-  #rd-ed blockquote{margin:0 0 11px;padding-left:11px;border-left:3px solid var(--warn);
+  #rd-ed blockquote{margin:0 0 11px;padding-left:11px;border-left:3px solid var(--accent);
     color:var(--dim);font-size:13.5px;font-style:italic;max-height:78px;overflow:auto}
   #rd-ed textarea{width:100%;min-height:88px;background:var(--bg);color:var(--ink);
     border:1px solid var(--line);border-radius:9px;padding:11px;font:15px/1.5 inherit;resize:vertical}
@@ -694,13 +737,20 @@ CSS = r"""
   #rd-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:90;
     background:var(--good);color:#fff;padding:12px 20px;border-radius:10px;font:650 14px/1 inherit;
     display:none;box-shadow:0 6px 22px rgba(0,0,0,.35);text-align:center;max-width:88vw}
-  @media(min-width:901px){ body{padding-right:var(--panw)} }
+  @media(min-width:901px){
+    body{padding-right:var(--panw);transition:padding-right .22s ease}
+    /* panel collapsed: drop the gutter so .wrap centres on the full viewport */
+    body.rd-nopanel{padding-right:0}
+    body.rd-nopanel #rd-panel{transform:translateX(101%)}
+    body.rd-nopanel #rd-fab{display:flex}
+  }
   @media(max-width:900px){
-    #rd-panel{width:min(400px,100%);transform:translateX(101%);transition:transform .22s ease;
+    #rd-panel{width:min(400px,100%);transform:translateX(101%);
       box-shadow:-8px 0 30px rgba(0,0,0,.3)}
     #rd-panel.open{transform:none}
     #rd-fab{display:flex}
     .rd-x{display:block}
+    .rd-hide{display:none}
   }
   @media print{
     #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,.rd-hint{display:none!important}
@@ -721,10 +771,10 @@ JS = r"""
   try{ embedded = JSON.parse(document.getElementById('rd-notes').textContent || '[]') || []; }
   catch(e){ embedded = []; }
 
-  var drafts = {notes:[], replies:[]};
+  var drafts = {notes:[], replies:[], patch:{}};
   try{
     var raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if(raw && raw.notes) drafts = {notes:raw.notes||[], replies:raw.replies||[]};
+    if(raw && raw.notes) drafts = {notes:raw.notes||[], replies:raw.replies||[], patch:raw.patch||{}};
   }catch(e){}
 
   /* once a draft shows up in the embedded block it must never resurrect */
@@ -738,6 +788,15 @@ JS = r"""
       return x.ts === r.ts && x.body === r.body && x.author === r.author;
     });
   });
+  /* same for an edit / resolve the embedded block has already caught up with */
+  Object.keys(drafts.patch).forEach(function(id){
+    var host = byId[id], p = drafts.patch[id];
+    if(!host) return;
+    var live = Object.keys(p).some(function(k){
+      return (host[k] || (k === 'status' ? 'open' : '')) !== p[k];
+    });
+    if(!live) delete drafts.patch[id];
+  });
   saveDrafts();
 
   var wrap = document.querySelector('.wrap'),
@@ -745,19 +804,37 @@ JS = r"""
       fab = document.getElementById('rd-fab'),
       panel = document.getElementById('rd-panel'),
       list = panel.querySelector('.rd-list'),
+      onlyBox = panel.querySelector('[data-openonly]'),
       ed = document.getElementById('rd-ed'),
       edTags = ed.querySelector('.rd-tags'),
       edQuote = ed.querySelector('blockquote'),
       edText = ed.querySelector('textarea'),
+      edSave = ed.querySelector('[data-save]'),
       toastEl = document.getElementById('rd-toast');
 
-  var pending = null, pendTag = 'question', filter = 'all';
+  var pending = null, editing = null, pendTag = 'question', tab = 'notes', openOnly = false;
 
   function saveDrafts(){
     try{
-      if(!drafts.notes.length && !drafts.replies.length) localStorage.removeItem(KEY);
-      else localStorage.setItem(KEY, JSON.stringify({v:1, notes:drafts.notes, replies:drafts.replies}));
+      if(!drafts.notes.length && !drafts.replies.length && !Object.keys(drafts.patch).length)
+        localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, JSON.stringify(
+        {v:1, notes:drafts.notes, replies:drafts.replies, patch:drafts.patch}));
     }catch(e){}
+  }
+  /* an edit, a resolve or a delete on a thread that is already in the document
+     is held here as an override until the user exports and Claude imports it */
+  function patch(id, obj){
+    var p = drafts.patch[id] || (drafts.patch[id] = {});
+    for(var k in obj) p[k] = obj[k];
+    saveDrafts(); reMark(id); render();
+  }
+  /* redraw one mark after its kind / status / deleted-ness changed */
+  function reMark(id){
+    var t = null, all = threads();
+    for(var i=0;i<all.length;i++) if(all[i].id === id) t = all[i];
+    unmark(id);
+    if(t && t.status !== 'deleted') anchor(t);
   }
   function uid(){ return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
   function label(k){ return TAGS[k] || k; }
@@ -785,50 +862,76 @@ JS = r"""
     while((n = w.nextNode())) out.push(n);
     return out;
   }
+  /* Character offset of a boundary point within a section's filtered text.
+     A selection that begins right at a tag edge — which is what you get when the
+     line starts with a `code` span — reports its boundary as the *element* plus a
+     child index rather than as a text node, so identity matching alone finds
+     nothing and the note ends up with no offset at all. Fall back to document
+     order in that case. */
   function offsetOf(nodes, container, off){
-    var acc = 0;
-    for(var i=0;i<nodes.length;i++){
-      if(nodes[i] === container) return acc + off;
+    var acc = 0, i;
+    if(container.nodeType === 3){
+      for(i=0;i<nodes.length;i++){
+        if(nodes[i] === container) return acc + off;
+        acc += nodes[i].data.length;
+      }
+    }
+    var probe = document.createRange();
+    try{ probe.setStart(container, off); probe.collapse(true); }
+    catch(e){ return -1; }
+    acc = 0;
+    for(i=0;i<nodes.length;i++){
+      var cmp;
+      try{ cmp = probe.comparePoint(nodes[i], nodes[i].data.length); }
+      catch(e){ return -1; }
+      if(cmp >= 0) return acc;      /* the point is at or before this node's end */
       acc += nodes[i].data.length;
     }
-    return -1;
+    return acc;
   }
-  function rangeAt(nodes, start, len){
-    var acc=0, sN=null, sO=0, eN=null, eO=0;
-    for(var i=0;i<nodes.length;i++){
-      var n = nodes[i], L = n.data.length;
-      if(sN === null && acc + L > start){ sN = n; sO = start - acc; }
-      if(sN !== null && acc + L >= start + len){ eN = n; eO = start + len - acc; break; }
+  /* Wrap [start, start+len) of a section in <mark>s. One surroundContents() over
+     the whole range throws whenever the range begins or ends inside an inline
+     element it does not fully contain — again, a selection starting on a `code`
+     span — so wrap each text node it touches separately, all sharing the note id. */
+  function mark(nodes, start, len, id, resolved, isHl){
+    var acc = 0, stop = start + len, hits = [], i;
+    for(i=0;i<nodes.length && acc < stop;i++){
+      var L = nodes[i].data.length,
+          s = Math.max(start - acc, 0), e = Math.min(stop - acc, L);
+      if(s < e) hits.push([nodes[i], s, e]);
       acc += L;
     }
-    if(!sN || !eN) return null;
-    var r = document.createRange();
-    try{ r.setStart(sN, sO); r.setEnd(eN, eO); }catch(e){ return null; }
-    return r;
-  }
-  function mark(range, id, resolved){
-    try{
-      var m = document.createElement('mark');
-      m.className = 'rd-hl' + (resolved ? ' done' : '');
-      m.dataset.noteId = id;
-      range.surroundContents(m);
-      return true;
-    }catch(e){ return false; }
+    if(!hits.length) return false;
+    var cls = 'rd-hl' + (isHl ? ' mk' : '') + (resolved ? ' done' : ''), ok = false;
+    for(i = hits.length - 1; i >= 0; i--){
+      var r = document.createRange(), m = document.createElement('mark');
+      m.className = cls; m.dataset.noteId = id;
+      try{
+        r.setStart(hits[i][0], hits[i][1]); r.setEnd(hits[i][0], hits[i][2]);
+        r.surroundContents(m);
+        ok = true;
+      }catch(err){}
+    }
+    return ok;
   }
   function anchor(n){
     if(!n.quote || !n.sectionId) return false;
     var sec = document.getElementById(n.sectionId);
     if(!sec || typeof n.start !== 'number') return false;
-    var r = rangeAt(secNodes(sec), n.start, n.quote.length);
-    if(!r || r.toString() !== n.quote) return false;
-    return mark(r, n.id, n.status === 'resolved');
+    var nodes = secNodes(sec), text = '';
+    for(var i=0;i<nodes.length;i++) text += nodes[i].data;
+    if(text.slice(n.start, n.start + n.quote.length) !== n.quote) return false;
+    return mark(nodes, n.start, n.quote.length, n.id,
+                n.status === 'resolved', n.kind === 'highlight');
   }
+  /* a note can own several marks now (one per text node it spans) */
   function unmark(id){
-    var m = document.querySelector('mark.rd-hl[data-note-id="' + id + '"]');
-    if(!m) return;
-    var p = m.parentNode;
-    while(m.firstChild) p.insertBefore(m.firstChild, m);
-    p.removeChild(m); p.normalize();
+    var ms = document.querySelectorAll('mark.rd-hl[data-note-id="' + id + '"]');
+    for(var i=0;i<ms.length;i++){
+      var m = ms[i], p = m.parentNode;
+      while(m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m); p.normalize();
+    }
   }
 
   /* ---------- merged view ---------- */
@@ -854,6 +957,8 @@ JS = r"""
       if(host) host.replies.push({author:r.author, body:r.body, ts:r.ts, _draft:true});
     });
     out.forEach(function(t){
+      var p = drafts.patch[t.id];
+      if(p){ for(var k in p) t[k] = p[k]; t._patched = true; }
       t.replies.sort(function(a,b){ return String(a.ts) < String(b.ts) ? -1 : 1; });
       t._anchored = !!document.querySelector('mark.rd-hl[data-note-id="' + t.id + '"]');
     });
@@ -871,17 +976,21 @@ JS = r"""
     d.className = 'rd-th' + (t.status === 'resolved' ? ' resolved fold' : '');
     d.dataset.id = t.id;
     var h = '<div class="sec"><span>' + esc(t.sectionTitle || 'General') + '</span>' +
-            (t.status === 'resolved' ? '<span class="rd-st">✓ resolved</span>' : '') + '</div>';
+            (t.status === 'resolved' ? '<button type="button" class="rd-st" data-status ' +
+               'title="Reopen this thread">✓ resolved</button>' : '') + '</div>';
     h += '<div class="tg"><span class="rd-chip">' + esc(label(t.tag)) + '</span>' +
-         (t._draft ? '<span class="rd-draft">not exported</span>' : '') +
+         (t._draft || t._patched ? '<span class="rd-draft">not exported</span>' : '') +
          (t.status === 'resolved' ? '<button type="button" class="rd-fold-btn" data-fold>' +
             foldTxt(true, t.replies.length) + '</button>' : '') + '</div>';
     if(t.quote) h += '<blockquote>' + esc(t.quote) + '</blockquote>';
-    if(t.body) h += msg('user', t.body, t._draft);
+    if(t.body) h += msg('user', t.body, t._draft, 'note', '');
     t.replies.forEach(function(r){
-      h += msg(r.author === 'claude' ? 'claude' : 'user', r.body, r._draft);
+      h += msg(r.author === 'claude' ? 'claude' : 'user', r.body, r._draft,
+               r._draft ? 'reply' : '', r.ts);
     });
     h += '<div class="rd-acts"><button type="button" data-reply>Reply</button>' +
+         '<button type="button" data-status>' +
+           (t.status === 'resolved' ? 'Reopen' : 'Mark resolved') + '</button>' +
          (t._draft ? '<button type="button" data-del>Delete</button>' : '') + '</div>';
     h += '<div class="rd-rep"><textarea placeholder="Reply to this thread…"></textarea>' +
          '<button class="rd-lite" type="button" data-send style="margin-top:6px">Save reply</button></div>';
@@ -897,6 +1006,24 @@ JS = r"""
         foldBtn.textContent = foldTxt(d.classList.contains('fold'), t.replies.length);
         return;
       }
+      var link = el.closest && el.closest('.rd-jump');
+      if(link){ e.stopPropagation(); e.preventDefault(); gotoSec(link); return; }
+      var edBtn = el.closest && el.closest('[data-edit]');
+      if(edBtn){
+        e.stopPropagation();
+        if(edBtn.dataset.edit === 'note') openEd(t.quote, t);
+        else editReply(d, t, edBtn.dataset.ts);
+        return;
+      }
+      var dropBtn = el.closest && el.closest('[data-drop]');
+      if(dropBtn){ e.stopPropagation(); dropReply(t.id, dropBtn.dataset.ts); return; }
+      if(el.hasAttribute && el.hasAttribute('data-status')){
+        e.stopPropagation();
+        var to = t.status === 'resolved' ? 'open' : 'resolved';
+        patch(t.id, {status:to});
+        toast(to === 'resolved' ? 'Marked resolved — export when you are done' : 'Reopened');
+        return;
+      }
       if(el.hasAttribute && el.hasAttribute('data-reply')){
         e.stopPropagation();
         var box = d.querySelector('.rd-rep');
@@ -910,48 +1037,152 @@ JS = r"""
       jump(t.id);
     });
     d.querySelector('[data-send]').addEventListener('click', function(){
-      var ta = d.querySelector('.rd-rep textarea'), body = ta.value.trim();
+      var box = d.querySelector('.rd-rep'), ta = box.querySelector('textarea'),
+          body = ta.value.trim();
       if(!body){ ta.focus(); return; }
-      drafts.replies.push({noteId:t.id, author:'user', body:body, ts:new Date().toISOString()});
-      saveDrafts(); render(); toast('Reply saved as draft — export when done');
+      var was = box.dataset.editTs, i = was ? draftReply(t.id, was) : -1;
+      if(i >= 0) drafts.replies[i].body = body;
+      else drafts.replies.push({noteId:t.id, author:'user', body:body, ts:new Date().toISOString()});
+      saveDrafts(); render();
+      toast(i >= 0 ? 'Reply updated' : 'Reply saved as draft — export when done');
     });
     return d;
   }
-  function msg(who, body, draft){
-    return '<div class="rd-msg ' + who + '"><div class="who">' +
-      (who === 'claude' ? 'Claude' : 'You') + (draft ? ' · draft' : '') +
-      '</div><div class="bd">' + esc(body) + '</div></div>';
+  function msg(who, body, draft, ref, ts){
+    var acts = '';
+    if(ref) acts = '<span class="sp"></span><button type="button" data-edit="' + ref +
+      '" data-ts="' + esc(ts || '') + '">edit</button>' +
+      (ref === 'reply' ? '<button type="button" data-drop data-ts="' + esc(ts || '') +
+         '">delete</button>' : '');
+    return '<div class="rd-msg ' + who + '"><div class="who"><span>' +
+      (who === 'claude' ? 'Claude' : 'You') + (draft ? ' · draft' : '') + '</span>' + acts +
+      '</div><div class="bd">' + linkify(esc(body)) + '</div></div>';
+  }
+  /* §N and [label](#sec-id) in a message body become jumps into the document,
+     so a reply can point at prose instead of repeating it */
+  var JUMP_RE = /\[([^\]\n]{1,80})\]\(#([A-Za-z0-9_-]+)\)|§\s?(\d+)/g;
+  function linkify(s){
+    return s.replace(JUMP_RE, function(m, txt, id, num){
+      if(id) return '<a class="rd-jump" data-sec="' + id + '">' + txt + '</a>';
+      return '<a class="rd-jump" data-num="' + num + '">§' + num + '</a>';
+    });
+  }
+  function secByNum(n){
+    var els = document.querySelectorAll('section.rd-sec h2 .num');
+    for(var i=0;i<els.length;i++)
+      if(els[i].textContent.trim() === String(n)) return els[i].closest('section.rd-sec');
+    return null;
+  }
+  function gotoSec(a){
+    var sec = a.dataset.sec ? document.getElementById(a.dataset.sec) : secByNum(a.dataset.num);
+    if(!sec){ toast('That section is not in this document'); return; }
+    if(window.matchMedia('(max-width:900px)').matches) panel.classList.remove('open');
+    sec.scrollIntoView({behavior:'smooth', block:'start'});
+    sec.classList.add('rd-flash');
+    setTimeout(function(){ sec.classList.remove('rd-flash'); }, 1500);
+  }
+  function draftReply(noteId, ts){
+    for(var i=0;i<drafts.replies.length;i++)
+      if(drafts.replies[i].noteId === noteId && drafts.replies[i].ts === ts) return i;
+    return -1;
+  }
+  function editReply(d, t, ts){
+    var i = draftReply(t.id, ts);
+    if(i < 0) return;
+    var box = d.querySelector('.rd-rep'), ta = box.querySelector('textarea');
+    box.classList.add('open');
+    box.dataset.editTs = ts;
+    ta.value = drafts.replies[i].body;
+    d.querySelector('[data-send]').textContent = 'Update reply';
+    ta.focus();
+  }
+  function dropReply(noteId, ts){
+    drafts.replies = drafts.replies.filter(function(r){
+      return !(r.noteId === noteId && r.ts === ts);
+    });
+    saveDrafts(); render();
   }
   function foldTxt(folded, nrep){
     if(!folded) return '▴ hide';
     return '▾ show ' + (nrep === 1 ? '1 reply' : nrep + ' replies');
   }
 
+  /* ---------- the highlights tab ---------- */
+  function hlCard(t){
+    var d = document.createElement('article');
+    d.className = 'rd-hlc' + (t._anchored ? '' : ' gone');
+    d.dataset.id = t.id;
+    var h = '<div class="sec"><span>' + esc(t.sectionTitle || 'General') + '</span>' +
+            (t._draft || t._patched ? '<span class="rd-draft">not exported</span>' : '') + '</div>';
+    h += '<blockquote>' + esc(t.quote) + '</blockquote>';
+    if(!t._anchored)
+      h += '<div class="ctx">not in the text any more' +
+           (t.context ? ' &middot; was in &ldquo;' + esc(t.context) + '&rdquo;' : '') + '</div>';
+    h += '<div class="rd-acts"><button type="button" data-note>Add a note</button>' +
+         '<button type="button" data-del>Delete</button></div>';
+    d.innerHTML = h;
+    d.addEventListener('click', function(e){
+      var el = e.target;
+      if(el.hasAttribute && el.hasAttribute('data-note')){
+        e.stopPropagation(); openEd(t.quote, t); return;
+      }
+      if(el.hasAttribute && el.hasAttribute('data-del')){
+        e.stopPropagation(); drop(t); return;
+      }
+      jump(t.id);
+    });
+    return d;
+  }
+  /* a draft is simply forgotten; anything already in the document has to travel
+     back to Claude as a tombstone, so import can take it out */
+  function drop(t){
+    if(t._draft) removeDraft(t.id);
+    else { patch(t.id, {status:'deleted'}); toast('Removed — export when you are done'); }
+  }
+
+  function setTab(t){ tab = t; syncTabs(); }
+  function syncTabs(){
+    [].forEach.call(panel.querySelectorAll('.rd-tabs button'), function(b){
+      b.classList.toggle('sel', b.dataset.tab === tab);
+    });
+    onlyBox.parentNode.style.display = tab === 'notes' ? 'flex' : 'none';
+  }
+
   function render(){
-    var all = threads(), shown = all.filter(function(t){
-      return filter === 'all' || t.status !== 'resolved';
-    });
-    var open = all.filter(function(t){ return t.status !== 'resolved'; }).length;
-    fab.querySelector('.n').textContent = open;
-    panel.querySelector('.rd-count').textContent = all.length + ' note' + (all.length === 1 ? '' : 's');
+    var all = threads().filter(function(t){ return t.status !== 'deleted'; }),
+        notes = all.filter(function(t){ return t.kind !== 'highlight'; }),
+        hls = all.filter(function(t){ return t.kind === 'highlight'; });
+    fab.querySelector('.n').textContent =
+      notes.filter(function(t){ return t.status !== 'resolved'; }).length;
+    count('notes', notes.length); count('hl', hls.length);
     list.innerHTML = '';
-    if(!all.length){
-      list.innerHTML = '<p class="small">No notes yet.<br><br>Select any text in the document and an ' +
-        '<b>Add note</b> button appears. Tag it as a question, a change, a concern, or ' +
-        '“I don’t understand this” — that last one is the most useful of all.</p>';
-      return;
+    if(tab === 'hl') return fill(hls, hlCard,
+      'No highlights yet.<br><br>Select any text and press <b>🖍 Highlight</b> to mark a ' +
+      'passage without writing anything. Highlights stay in this tab even if the wording ' +
+      'later changes, so nothing you flagged gets lost.',
+      'Not in the text any more');
+    fill(notes.filter(function(t){ return !openOnly || t.status !== 'resolved'; }), card,
+      'No notes yet.<br><br>Select any text in the document and a <b>💬 Note</b> button ' +
+      'appears. Tag it as a question, a change, a concern, or “I don’t understand this” — ' +
+      'that last one is the most useful of all.',
+      'Unanchored — the quoted text has changed');
+
+    function count(k, n){
+      panel.querySelector('.rd-tabs [data-tab="' + k + '"] .k').textContent = n;
     }
-    var anchored = shown.filter(function(t){ return t._anchored || !t.quote; });
-    var loose = shown.filter(function(t){ return !t._anchored && t.quote; });
-    var seen = null;
-    anchored.forEach(function(t){
-      var title = t.sectionTitle || 'General';
-      if(title !== seen){ seen = title; add('rd-grp', title); }
-      list.appendChild(card(t));
-    });
-    if(loose.length){
-      add('rd-grp', 'Unanchored — the quoted text has changed');
-      loose.forEach(function(t){ list.appendChild(card(t)); });
+    function fill(rows, make, empty, looseTitle){
+      if(!rows.length){ list.innerHTML = '<p class="small">' + empty + '</p>'; return; }
+      var seen = null;
+      rows.filter(function(t){ return t._anchored || !t.quote; }).forEach(function(t){
+        var title = t.sectionTitle || 'General';
+        if(title !== seen){ seen = title; add('rd-grp', title); }
+        list.appendChild(make(t));
+      });
+      var loose = rows.filter(function(t){ return !t._anchored && t.quote; });
+      if(loose.length){
+        add('rd-grp', looseTitle);
+        loose.forEach(function(t){ list.appendChild(make(t)); });
+      }
     }
     function add(cls, text){
       var e = document.createElement('div'); e.className = cls; e.textContent = text;
@@ -962,20 +1193,31 @@ JS = r"""
   function removeDraft(id){
     drafts.notes = drafts.notes.filter(function(n){ return n.id !== id; });
     drafts.replies = drafts.replies.filter(function(r){ return r.noteId !== id; });
+    delete drafts.patch[id];
     saveDrafts(); unmark(id); render();
   }
   function jump(id){
-    var m = document.querySelector('mark.rd-hl[data-note-id="' + id + '"]');
-    if(!m){ toast('This note is no longer anchored to any text'); return; }
+    var ms = document.querySelectorAll('mark.rd-hl[data-note-id="' + id + '"]');
+    if(!ms.length){ toast('This note is no longer anchored to any text'); return; }
     if(window.matchMedia('(max-width:900px)').matches) panel.classList.remove('open');
-    m.scrollIntoView({behavior:'smooth', block:'center'});
-    m.classList.add('on');
-    setTimeout(function(){ m.classList.remove('on'); }, 1900);
+    ms[0].scrollIntoView({behavior:'smooth', block:'center'});
+    for(var i=0;i<ms.length;i++) ms[i].classList.add('on');
+    setTimeout(function(){
+      for(var j=0;j<ms.length;j++) ms[j].classList.remove('on');
+    }, 1900);
   }
   function focusThread(id){
-    var c = list.querySelector('.rd-th[data-id="' + id + '"]');
-    if(!c){ toast('That thread is filtered out — showing all'); filter = 'all'; syncFilter(); render();
-            c = list.querySelector('.rd-th[data-id="' + id + '"]'); }
+    if(collapsed()) collapse(false);
+    var sel = '[data-id="' + id + '"]', c = list.querySelector(sel);
+    if(!c){
+      var t = null, all = threads();
+      for(var i=0;i<all.length;i++) if(all[i].id === id) t = all[i];
+      if(!t) return;
+      setTab(t.kind === 'highlight' ? 'hl' : 'notes');
+      if(openOnly){ openOnly = false; onlyBox.checked = false; }
+      render();
+      c = list.querySelector(sel);
+    }
     if(!c) return;
     panel.classList.add('open');
     c.scrollIntoView({block:'center'});
@@ -983,7 +1225,7 @@ JS = r"""
     setTimeout(function(){ c.classList.remove('sel'); }, 1900);
   }
 
-  /* ---------- selection -> add note ---------- */
+  /* ---------- selection -> highlight or note ---------- */
   function hideBar(){ bar.style.display = 'none'; }
   function onSel(){
     if(ed.classList.contains('open')) return;
@@ -994,7 +1236,7 @@ JS = r"""
     if(!wrap.contains(r.commonAncestorContainer)) return hideBar();
     var b = r.getBoundingClientRect();
     if(!b.width && !b.height) return hideBar();
-    bar.style.display = 'block';
+    bar.style.display = 'flex';
     bar.style.left = (b.left + b.width/2 + window.scrollX) + 'px';
     bar.style.top = (b.top + window.scrollY - 9) + 'px';
   }
@@ -1002,22 +1244,46 @@ JS = r"""
   document.addEventListener('touchend', function(){ setTimeout(onSel, 10); });
   document.addEventListener('scroll', hideBar, {passive:true});
 
-  bar.querySelector('button').addEventListener('click', function(){
+  /* everything both buttons need: the text, where it sits, and enough context to
+     still make sense in the panel if the prose it came from is rewritten */
+  function capture(){
     var s = window.getSelection();
-    if(!s || !s.rangeCount) return;
+    if(!s || !s.rangeCount) return null;
     var r = s.getRangeAt(0), quote = r.toString().trim();
-    if(quote.length < 2) return;
+    if(quote.length < 2) return null;
     var sc = r.startContainer, el = sc.nodeType === 1 ? sc : sc.parentElement;
     var host = el && el.closest ? el.closest('section.rd-sec') : null;
+    var blk = el && el.closest ? el.closest('p,li,td,th,h2,h3,pre,blockquote,.an,.t') : null;
     var nodes = host ? secNodes(host) : [];
     var start = host ? offsetOf(nodes, r.startContainer, r.startOffset) : -1;
     var lead = r.toString().indexOf(quote);
     if(start >= 0 && lead > 0) start += lead;
-    pending = { quote:quote, sectionId:host ? host.id : null,
-                sectionTitle:host ? (host.dataset.title || '') : 'General',
-                start: start >= 0 ? start : null, range:r.cloneRange() };
-    openEd(quote);
-    s.removeAllRanges(); hideBar();
+    return { quote:quote, sectionId:host ? host.id : null,
+             sectionTitle:host ? (host.dataset.title || '') : 'General',
+             context: blk ? blk.textContent.replace(/\s+/g,' ').trim().slice(0, 90) : '',
+             start: start >= 0 ? start : null };
+  }
+  function clearSel(){
+    var s = window.getSelection();
+    if(s) s.removeAllRanges();
+    hideBar();
+  }
+  bar.querySelector('[data-note]').addEventListener('click', function(){
+    pending = capture();
+    if(!pending) return;
+    openEd(pending.quote);
+    clearSel();
+  });
+  bar.querySelector('[data-hl]').addEventListener('click', function(){
+    var p = capture();
+    if(!p) return;
+    var n = { id:uid(), kind:'highlight', tag:'highlight', quote:p.quote,
+              sectionId:p.sectionId, sectionTitle:p.sectionTitle, context:p.context,
+              start:p.start, body:'', author:'user', ts:new Date().toISOString(),
+              replies:[], status:'open', anchored:true };
+    drafts.notes.push(n); saveDrafts();
+    anchor(n);
+    clearSel(); render(); toast('Highlighted — export when you are done');
   });
 
   Object.keys(TAGS).forEach(function(k){
@@ -1032,36 +1298,73 @@ JS = r"""
       x.classList.toggle('sel', x.dataset.k === k);
     });
   }
-  function openEd(quote){
-    selTag('question');
+  function openEd(quote, note){
+    editing = note || null;
+    var conv = !!note && note.kind === 'highlight';   /* highlight -> note */
+    selTag(note && TAGS[note.tag] ? note.tag : 'question');
     if(quote){ edQuote.textContent = '“' + quote + '”'; edQuote.style.display = 'block'; }
     else edQuote.style.display = 'none';
-    edText.value = ''; ed.classList.add('open');
+    edText.value = note ? (note.body || '') : '';
+    edSave.textContent = note && !conv ? 'Update note' : 'Save note';
+    ed.classList.add('open');
     setTimeout(function(){ edText.focus(); }, 50);
   }
-  function closeEd(){ ed.classList.remove('open'); pending = null; }
+  function closeEd(){ ed.classList.remove('open'); pending = null; editing = null; }
   ed.querySelector('[data-cancel]').addEventListener('click', closeEd);
-  ed.querySelector('[data-save]').addEventListener('click', function(){
+  edSave.addEventListener('click', function(){
     var body = edText.value.trim();
     if(!body && NO_BODY_TAGS.indexOf(pendTag) < 0){ edText.focus(); return; }
-    var n = { id:uid(), tag:pendTag, quote:pending ? pending.quote : '',
+    if(editing){
+      var id = editing.id, was = editing.kind, p = {tag:pendTag, body:body};
+      if(was === 'highlight') p.kind = 'note';
+      closeEd();
+      patch(id, p);
+      if(was === 'highlight'){ setTab('notes'); render(); focusThread(id); }
+      toast(was === 'highlight' ? 'Now a note — export when you are done'
+                                : 'Note updated — export when you are done');
+      return;
+    }
+    var n = { id:uid(), kind:'note', tag:pendTag, quote:pending ? pending.quote : '',
               sectionId:pending ? pending.sectionId : null,
               sectionTitle:pending ? pending.sectionTitle : 'General',
+              context:pending ? pending.context : '',
               start:pending ? pending.start : null, body:body, author:'user',
               ts:new Date().toISOString(), replies:[], status:'open', anchored:true };
     drafts.notes.push(n); saveDrafts();
-    if(pending && pending.range) mark(pending.range, n.id, false);
-    closeEd(); render(); toast('Note saved — export when you are done');
+    anchor(n);
+    closeEd(); setTab('notes'); render(); toast('Note saved — export when you are done');
   });
   edText.addEventListener('keydown', function(e){
-    if((e.metaKey || e.ctrlKey) && e.key === 'Enter') ed.querySelector('[data-save]').click();
+    if((e.metaKey || e.ctrlKey) && e.key === 'Enter') edSave.click();
   });
 
   document.addEventListener('click', function(e){
     var m = e.target.closest && e.target.closest('mark.rd-hl');
     if(m) focusThread(m.dataset.noteId);
   });
-  fab.addEventListener('click', function(){ panel.classList.toggle('open'); });
+  /* ---------- panel collapse (desktop) + view state ---------- */
+  var UIKEY = KEY + ':ui', ui = {};
+  try{
+    var rawUi = localStorage.getItem(UIKEY);
+    if(rawUi === 'hidden') ui = {c:1};               /* pre-tabs format */
+    else if(rawUi) ui = JSON.parse(rawUi) || {};
+  }catch(e){ ui = {}; }
+  function saveUi(){ try{ localStorage.setItem(UIKEY, JSON.stringify(ui)); }catch(e){} }
+  function wide(){ return window.matchMedia('(min-width:901px)').matches; }
+  function collapsed(){ return document.body.classList.contains('rd-nopanel'); }
+  function collapse(on){
+    document.body.classList.toggle('rd-nopanel', !!on);
+    ui.c = on ? 1 : 0; saveUi();
+  }
+  if(ui.c) document.body.classList.add('rd-nopanel');
+  openOnly = !!ui.o;                                  /* the tab itself never persists:
+                                                         always land on Notes after a rebuild */
+  panel.querySelector('[data-collapse]').addEventListener('click', function(){ collapse(true); });
+
+  fab.addEventListener('click', function(){
+    if(wide() && collapsed()){ collapse(false); return; }
+    panel.classList.toggle('open');
+  });
   panel.querySelector('[data-close]').addEventListener('click', function(){
     panel.classList.remove('open');
   });
@@ -1073,20 +1376,20 @@ JS = r"""
     if(ed.classList.contains('open')) closeEd();
     else panel.classList.remove('open');
   });
-  function syncFilter(){
-    [].forEach.call(panel.querySelectorAll('.rd-filters button'), function(b){
-      b.classList.toggle('sel', b.dataset.filter === filter);
-    });
-  }
-  [].forEach.call(panel.querySelectorAll('.rd-filters button'), function(b){
-    b.addEventListener('click', function(){ filter = b.dataset.filter; syncFilter(); render(); });
+  [].forEach.call(panel.querySelectorAll('.rd-tabs button'), function(b){
+    b.addEventListener('click', function(){ setTab(b.dataset.tab); render(); });
+  });
+  onlyBox.checked = openOnly;
+  onlyBox.addEventListener('change', function(){
+    openOnly = onlyBox.checked; ui.o = openOnly ? 1 : 0; saveUi(); render();
   });
 
   /* ---------- export ---------- */
   function payload(){
     return threads().map(function(t){
-      return { id:t.id, tag:t.tag, quote:t.quote, sectionId:t.sectionId,
-               sectionTitle:t.sectionTitle, start:t.start, body:t.body,
+      return { id:t.id, kind:t.kind || 'note', tag:t.tag, quote:t.quote,
+               sectionId:t.sectionId, sectionTitle:t.sectionTitle,
+               context:t.context || '', start:t.start, body:t.body,
                author:t.author || 'user', ts:t.ts, status:t.status || 'open',
                anchored: t._anchored,
                replies: t.replies.map(function(r){
@@ -1132,10 +1435,14 @@ JS = r"""
     return Promise.resolve('download');
   }
   function toMd(){
-    var ts = payload(), L = ['# Review notes — ' + DOC.title, '',
-      'Source: `' + DOC.file + '`', 'Threads: **' + ts.length + '**', '', '---', ''];
+    var all = payload().filter(function(t){ return t.status !== 'deleted'; }),
+        ns = all.filter(function(t){ return t.kind !== 'highlight'; }),
+        hs = all.filter(function(t){ return t.kind === 'highlight'; });
+    var L = ['# Review notes — ' + DOC.title, '',
+      'Source: `' + DOC.file + '`',
+      'Threads: **' + ns.length + '** · highlights: **' + hs.length + '**', '', '---', ''];
     var seen = null;
-    ts.forEach(function(t){
+    ns.forEach(function(t){
       if(t.sectionTitle !== seen){ seen = t.sectionTitle; L.push('## ' + (seen || 'General'), ''); }
       L.push('**' + label(t.tag) + '**  `' + t.id + '`' +
              (t.status === 'resolved' ? ' _(resolved)_' : ''), '');
@@ -1146,6 +1453,16 @@ JS = r"""
                r.body.replace(/\s*\n\s*/g, ' '), '');
       });
     });
+    if(hs.length){
+      L.push('---', '', '## Highlights (no comment attached)', '');
+      seen = null;
+      hs.forEach(function(t){
+        if(t.sectionTitle !== seen){ seen = t.sectionTitle; L.push('**' + (seen || 'General') + '**', ''); }
+        L.push('- ' + t.quote.replace(/\s*\n\s*/g, ' ') +
+               (t.anchored ? '' : '  _(no longer in the text)_'));
+      });
+      L.push('');
+    }
     return L.join('\n');
   }
   panel.querySelector('[data-export]').addEventListener('click', function(){
@@ -1173,25 +1490,31 @@ JS = r"""
     else fallback();
   });
 
-  embedded.forEach(anchor);
-  drafts.notes.forEach(anchor);
-  syncFilter();
+  /* one pass over the merged view, so a locally-deleted mark never comes back
+     and highlights get the marker-pen class rather than the note one */
+  threads().forEach(function(t){ if(t.status !== 'deleted') anchor(t); });
+  syncTabs();
   render();
 })();
 """
 
 PANEL = """
-<div id="rd-bar"><button type="button">&#128172; Add note</button></div>
+<div id="rd-bar">
+  <button type="button" data-hl>&#128396; Highlight</button>
+  <button type="button" data-note>&#128172; Note</button>
+</div>
 
 <button id="rd-fab" type="button">&#128221; Review <span class="n">0</span></button>
 
 <aside id="rd-panel" aria-label="Review comments">
-  <header><b>Review</b><span class="small rd-count">0 notes</span>
+  <header><b>Review</b>
+    <button class="rd-hide" type="button" data-collapse title="Hide panel &mdash; centre the document">&#8677;</button>
     <button class="rd-x" type="button" data-close>&#10005;</button></header>
-  <div class="rd-filters">
-    <button type="button" data-filter="all">All</button>
-    <button type="button" data-filter="open">Open only</button>
+  <div class="rd-tabs">
+    <button type="button" data-tab="notes">Notes <span class="k">0</span></button>
+    <button type="button" data-tab="hl">Highlights <span class="k">0</span></button>
   </div>
+  <label class="rd-only"><input type="checkbox" data-openonly> Show open only</label>
   <div class="rd-list"></div>
   <div class="rd-foot">
     <button class="rd-big" type="button" data-export>&#10003; Export notes for Claude</button>
@@ -1210,11 +1533,14 @@ PANEL = """
 <div id="rd-toast"></div>
 """
 
-HINT = """<div class="rd-hint"><b>This page is for you to mark up.</b> Select any sentence and an
-<b>Add note</b> button appears &mdash; tag it as a question, a change, a concern, or
-&ldquo;I don't understand this&rdquo;. Notes appear in the review panel and are kept in this browser
-until you hit <b>Export notes for Claude</b>, which drops a JSON file in your Downloads. Tell Claude
-when you're done and it will read them, reply in the panel, and rebuild the page.</div>"""
+HINT = """<div class="rd-hint"><b>This page is for you to mark up.</b> Select any sentence and two
+buttons appear: <b>&#128396; Highlight</b> just marks the passage, <b>&#128172; Note</b> attaches a
+question, a change, a concern or &ldquo;I don't understand this&rdquo;. The panel keeps them in
+separate tabs; you can edit or delete your own, and mark a thread resolved &mdash; closing a thread
+is yours to decide, never Claude's. Everything is kept in this browser until you hit
+<b>Export notes for Claude</b>, which saves a JSON file. Tell Claude when you're done and it will
+read them, reply in the panel, and rebuild the page. Use <b>&#8677;</b> in the panel header to hide
+it and centre the text.</div>"""
 
 
 def render_html(src_text, out_name, old_notes):
@@ -1393,12 +1719,19 @@ def cmd_import(a):
         die("%s: every note must be an object with an \"id\"" % a.notes)
 
     by_id = dict((n["id"], n) for n in notes if "id" in n)
-    added = merged = 0
+    added = merged = edited = dropped = 0
     for raw in incoming:
         if not isinstance(raw, dict) or "id" not in raw:
             continue
         n = normalise(dict(raw))
         cur = by_id.get(n["id"])
+        # the reader deleted it in the panel: take it out and never re-add it
+        if n["status"] == "deleted":
+            if cur is not None:
+                notes.remove(cur)
+                del by_id[n["id"]]
+                dropped += 1
+            continue
         if cur is None:
             notes.append(n)
             by_id[n["id"]] = n
@@ -1411,40 +1744,58 @@ def cmd_import(a):
                 cur["replies"].append(r)
                 have.add(key)
                 merged += 1
-        if n.get("status") == "resolved":
-            cur["status"] = "resolved"
+        # the reader owns the question and its status: whatever came back wins
+        for k in ("kind", "tag", "body", "status", "context"):
+            if k in raw and n[k] != cur.get(k):
+                cur[k] = n[k]
+                edited += 1
 
     reanchor(notes, doc_sections(html))
     with open(a.doc, "w", encoding="utf-8") as f:
         f.write(write_notes(html, notes))
     loose = sum(1 for n in notes if not n.get("anchored"))
+    hl = sum(1 for n in notes if n.get("kind") == "highlight")
     print(
-        "imported into %s: %d new thread(s), %d new repl(ies), %d total, %d unanchored"
-        % (a.doc, added, merged, len(notes), loose)
+        "imported into %s: %d new, %d new repl(ies), %d edit(s), %d removed — "
+        "%d thread(s) + %d highlight(s), %d unanchored"
+        % (a.doc, added, merged, edited, dropped, len(notes) - hl, hl, loose)
     )
+
+
+def is_hl(n):
+    return n.get("kind") == "highlight"
 
 
 def cmd_list(a):
     notes = read_notes(read(a.doc), a.doc)
-    if a.open_only:
-        notes = [n for n in notes if n.get("status") != "resolved"]
+    hl = [n for n in notes if is_hl(n)]
+    if a.highlights:
+        notes = hl
+    else:
+        notes = [n for n in notes if not is_hl(n)]
+        if a.open_only:
+            notes = [n for n in notes if n.get("status") != "resolved"]
     if a.json:
         print(json.dumps(notes, ensure_ascii=False, indent=2))
         return
     if not notes:
-        print("no notes")
-        return
+        print("no highlights" if a.highlights else "no notes")
     for n in notes:
         q = re.sub(r"\s+", " ", n.get("quote") or "").strip()
         if len(q) > 52:
             q = q[:51] + "…"
+        flag = "" if n.get("anchored", True) else "!"
+        if a.highlights:
+            print("%-10s %-1s %-26s %s" % (n.get("id", "?"), flag,
+                  (n.get("sectionTitle") or "General")[:26], '"%s"' % q))
+            continue
         print(
             "%-10s %-9s %-8s %-1s %-26s %-54s replies:%d"
             % (
                 n.get("id", "?"),
                 n.get("tag", "?"),
                 n.get("status", "open"),
-                "" if n.get("anchored", True) else "!",
+                flag,
                 (n.get("sectionTitle") or "General")[:26],
                 '"%s"' % q if q else "(general)",
                 len(n.get("replies") or []),
@@ -1453,6 +1804,9 @@ def cmd_list(a):
     loose = [n["id"] for n in notes if not n.get("anchored", True)]
     if loose:
         print("! unanchored: %s" % " ".join(loose))
+    if hl and not a.highlights:
+        print("+ %d highlight(s) — no reply needed: reviewdoc.py list %s --highlights"
+              % (len(hl), a.doc))
 
 
 def _save_notes(path, html, notes):
@@ -1460,13 +1814,23 @@ def _save_notes(path, html, notes):
         f.write(write_notes(html, notes))
 
 
+READER_CLOSES = (
+    "closing a thread is the reader's call, not yours. They resolve it from the "
+    "\"Mark resolved\" button in the review panel and it arrives on the next import. "
+    "Reply and leave the thread open."
+)
+
+
 def cmd_reply(a):
+    if a.resolve:
+        die(READER_CLOSES)
     html = read(a.doc)
     notes = read_notes(html, a.doc)
     if a.all_open:
         if len(a.rest) != 1:
             die('reply --all-open takes exactly one text argument')
-        targets = [n for n in notes if n.get("status") != "resolved"]
+        targets = [n for n in notes
+                   if n.get("status") != "resolved" and not is_hl(n)]
         if not targets:
             die("no open threads to reply to")
         text = a.rest[0]
@@ -1477,6 +1841,9 @@ def cmd_reply(a):
         targets = [n for n in notes if n.get("id") == nid]
         if not targets:
             die("no thread with id %s (try: reviewdoc.py list %s)" % (nid, a.doc))
+        if is_hl(targets[0]):
+            die("%s is a highlight, not a question — the reader marked that passage "
+                "without asking anything, so there is nothing to answer." % nid)
     if not text.strip():
         die("reply text is empty")
     ts = now_iso()
@@ -1484,29 +1851,15 @@ def cmd_reply(a):
         n.setdefault("replies", []).append(
             {"author": "claude", "body": text, "ts": ts}
         )
-        if a.resolve:
-            n["status"] = "resolved"
     _save_notes(a.doc, html, notes)
     print(
-        "replied to %d thread(s)%s: %s"
-        % (
-            len(targets),
-            " and resolved" if a.resolve else "",
-            " ".join(n.get("id", "?") for n in targets),
-        )
+        "replied to %d thread(s): %s"
+        % (len(targets), " ".join(n.get("id", "?") for n in targets))
     )
 
 
 def cmd_resolve(a):
-    html = read(a.doc)
-    notes = read_notes(html, a.doc)
-    hit = [n for n in notes if n.get("id") == a.note_id]
-    if not hit:
-        die("no thread with id %s (try: reviewdoc.py list %s)" % (a.note_id, a.doc))
-    for n in hit:
-        n["status"] = "resolved"
-    _save_notes(a.doc, html, notes)
-    print("resolved %s" % a.note_id)
+    die(READER_CLOSES)
 
 
 def main(argv=None):
@@ -1539,6 +1892,8 @@ def main(argv=None):
     q = sub.add_parser("list", help="print threads, one line each")
     q.add_argument("doc")
     q.add_argument("--open-only", action="store_true")
+    q.add_argument("--highlights", action="store_true",
+                   help="list the reader's highlights instead of the note threads")
     q.add_argument("--json", action="store_true")
     q.set_defaults(fn=cmd_list)
 
@@ -1546,10 +1901,11 @@ def main(argv=None):
     q.add_argument("doc")
     q.add_argument("rest", nargs="*")
     q.add_argument("--all-open", action="store_true")
-    q.add_argument("--resolve", action="store_true")
+    q.add_argument("--resolve", action="store_true",
+                   help="(refused — only the reader closes a thread)")
     q.set_defaults(fn=cmd_reply)
 
-    q = sub.add_parser("resolve", help="mark a thread resolved")
+    q = sub.add_parser("resolve", help="(refused — only the reader closes a thread)")
     q.add_argument("doc")
     q.add_argument("note_id")
     q.set_defaults(fn=cmd_resolve)
