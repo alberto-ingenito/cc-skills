@@ -2,7 +2,7 @@
 
 Turns a markdown file into a **single self-contained HTML review document** with a
 Word-style threaded comment panel on the right. You select a sentence and either
-highlight it or tag a note (question / change this / concern / don't understand /
+highlight it or tag a note (question / clarify / change this / defer to backlog /
 agree); Claude's answers come back stacked underneath your comment in the same thread.
 
 One Python file, stdlib only. No install, no npm, no build step, no server, no
@@ -18,6 +18,7 @@ python3 $R build myplan.md --open      # render and open
 # ... annotate, then press "Export notes for Claude" ...
 python3 $R import myplan.html ~/Downloads/myplan-notes.json
 python3 $R list myplan.html            # the threads needing an answer
+python3 $R list myplan.html --deferred
 python3 $R list myplan.html --highlights
 python3 $R reply myplan.html u1 "answer"
 python3 $R build myplan.md             # rebuild; reload the page
@@ -81,6 +82,22 @@ passage gets the blue underline instead. The panel has a tab for each, with a
 **Show open only** checkbox on the Notes tab. A highlight can be promoted to a note
 later from its card.
 
+Notes are listed **newest activity first** — Claude's freshest answers and anything
+you just wrote sit at the top — rather than grouped by section. Each card still names
+its section, and notes whose text has since changed collect at the bottom under
+**Unanchored**. Highlights stay in document order instead, since they read as a map
+of the page.
+
+Five note tags:
+
+| | |
+|---|---|
+| **❓ Question** | a question to answer |
+| **🔍 Clarify** | "expand on this" — needs no text, the quote is the ask |
+| **✏️ Change this** | you want the plan or the wording different |
+| **📥 Defer to backlog** | valid but not now — Claude opens a GitLab issue and replies with the link |
+| **👍 Agree** | needs no text, and files itself **already closed** so it never lands in Claude's queue |
+
 Highlights survive a rewrite. If the wording they were attached to is gone, the
 highlight stays in its tab, marked *not in the text any more*, with the section it
 was in and the opening of its original paragraph — so nothing you marked is lost
@@ -101,7 +118,8 @@ cannot reply to a highlight at all, since no question was asked.
 
 Claude's replies linkify `§N` and `[label](#sec-id)` into jumps that scroll the
 document to that section and flash it, so an answer that lives in the prose needs
-only a pointer in the panel rather than a second copy.
+only a pointer in the panel rather than a second copy. Bare URLs become ordinary
+links, which is how a deferred thread comes back carrying its issue.
 
 `example.md` is a complete source document exercising every directive, including an
 inline SVG diagram — copy it as a starting point.

@@ -21,13 +21,22 @@ TAGS = {
     "question": "❓ Question",
     "clarify": "\U0001f50d Clarify",
     "change": "✏️ Change this",
-    "concern": "⚠️ Concern",
-    "unclear": "\U0001f937 Don't understand",
+    "defer": "\U0001f4e5 Defer to backlog",
     "agree": "\U0001f44d Agree",
 }
 
-# Tags that can be submitted without a note body (the quote alone is the ask).
-NO_BODY_TAGS = {"clarify"}
+# Retired tags. Not offered any more, but old documents still contain them and
+# should keep rendering with a proper label instead of a bare key.
+OLD_TAGS = {
+    "concern": "⚠️ Concern",
+    "unclear": "\U0001f937 Don't understand",
+    "highlight": "\U0001f58d Highlight",
+}
+
+# Tags that can be submitted without a note body (the quote alone is the point).
+NO_BODY_TAGS = {"clarify", "agree", "defer"}
+# ...and tags that file themselves as settled rather than as an open question.
+CLOSING_TAGS = {"agree"}
 NOTES_RE = re.compile(
     r'(<script id="rd-notes" type="application/json">)(.*?)(</script>)', re.S
 )
@@ -43,7 +52,9 @@ def die(msg):
 
 
 def now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # milliseconds, not seconds: the panel orders threads by their newest reply,
+    # and several `reply` calls inside one second must still be distinguishable
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def esc(s):
@@ -763,8 +774,10 @@ JS = r"""
 (function(){
   "use strict";
   var DOC = __DOC__;
-  var TAGS = __TAGS__;
+  var TAGS = __TAGS__;            /* offered in the picker, in this order */
+  var LABELS = __LABELS__;        /* display labels, including retired tags */
   var NO_BODY_TAGS = __NO_BODY_TAGS__;
+  var CLOSING_TAGS = __CLOSING_TAGS__;
   var KEY = 'reviewdoc:' + DOC.slug;
 
   var embedded = [];
@@ -837,7 +850,7 @@ JS = r"""
     if(t && t.status !== 'deleted') anchor(t);
   }
   function uid(){ return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-  function label(k){ return TAGS[k] || k; }
+  function label(k){ return LABELS[k] || TAGS[k] || k; }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function toast(m){ toastEl.textContent = m; toastEl.style.display = 'block';
@@ -961,6 +974,11 @@ JS = r"""
       if(p){ for(var k in p) t[k] = p[k]; t._patched = true; }
       t.replies.sort(function(a,b){ return String(a.ts) < String(b.ts) ? -1 : 1; });
       t._anchored = !!document.querySelector('mark.rd-hl[data-note-id="' + t.id + '"]');
+      /* newest thing that happened in this thread, whoever did it */
+      t._last = String(t.ts || '');
+      t.replies.forEach(function(r){
+        if(String(r.ts) > t._last) t._last = String(r.ts);
+      });
     });
     out.sort(function(a,b){
       var ai = a.sectionId in secIndex ? secIndex[a.sectionId] : 999,
@@ -1008,6 +1026,8 @@ JS = r"""
       }
       var link = el.closest && el.closest('.rd-jump');
       if(link){ e.stopPropagation(); e.preventDefault(); gotoSec(link); return; }
+      /* a real link (a backlog issue, say) should navigate, not jump the card */
+      if(el.closest && el.closest('a[href]')){ e.stopPropagation(); return; }
       var edBtn = el.closest && el.closest('[data-edit]');
       if(edBtn){
         e.stopPropagation();
@@ -1058,12 +1078,16 @@ JS = r"""
       (who === 'claude' ? 'Claude' : 'You') + (draft ? ' · draft' : '') + '</span>' + acts +
       '</div><div class="bd">' + linkify(esc(body)) + '</div></div>';
   }
-  /* §N and [label](#sec-id) in a message body become jumps into the document,
-     so a reply can point at prose instead of repeating it */
-  var JUMP_RE = /\[([^\]\n]{1,80})\]\(#([A-Za-z0-9_-]+)\)|§\s?(\d+)/g;
+  /* In a message body: §N and [label](#sec-id) become jumps into the document, so
+     a reply can point at prose instead of repeating it; URLs (a backlog issue, say)
+     become ordinary links. One alternation, so a link never nests inside a link. */
+  var JUMP_RE = /\[([^\]\n]{1,80})\]\((#[A-Za-z0-9_-]+|https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+[^\s<.,;:!?)])|§\s?(\d+)/g;
   function linkify(s){
-    return s.replace(JUMP_RE, function(m, txt, id, num){
-      if(id) return '<a class="rd-jump" data-sec="' + id + '">' + txt + '</a>';
+    return s.replace(JUMP_RE, function(m, txt, target, bare, num){
+      if(target) return target.charAt(0) === '#'
+        ? '<a class="rd-jump" data-sec="' + target.slice(1) + '">' + txt + '</a>'
+        : '<a href="' + target + '" target="_blank" rel="noopener">' + txt + '</a>';
+      if(bare) return '<a href="' + bare + '" target="_blank" rel="noopener">' + bare + '</a>';
       return '<a class="rd-jump" data-num="' + num + '">§' + num + '</a>';
     });
   }
@@ -1156,15 +1180,18 @@ JS = r"""
       notes.filter(function(t){ return t.status !== 'resolved'; }).length;
     count('notes', notes.length); count('hl', hls.length);
     list.innerHTML = '';
+    /* highlights read as a map of the document, so they stay in document order.
+       notes are a work queue: newest activity on top, no section grouping. */
     if(tab === 'hl') return fill(hls, hlCard,
       'No highlights yet.<br><br>Select any text and press <b>🖍 Highlight</b> to mark a ' +
       'passage without writing anything. Highlights stay in this tab even if the wording ' +
       'later changes, so nothing you flagged gets lost.',
       'Not in the text any more');
-    fill(notes.filter(function(t){ return !openOnly || t.status !== 'resolved'; }), card,
+    notes = notes.filter(function(t){ return !openOnly || t.status !== 'resolved'; });
+    notes.sort(function(a,b){ return a._last < b._last ? 1 : (a._last > b._last ? -1 : 0); });
+    fill(notes, card,
       'No notes yet.<br><br>Select any text in the document and a <b>💬 Note</b> button ' +
-      'appears. Tag it as a question, a change, a concern, or “I don’t understand this” — ' +
-      'that last one is the most useful of all.',
+      'appears — ask a question, ask for a change, defer it to the backlog, or just agree.',
       'Unanchored — the quoted text has changed');
 
     function count(k, n){
@@ -1172,10 +1199,7 @@ JS = r"""
     }
     function fill(rows, make, empty, looseTitle){
       if(!rows.length){ list.innerHTML = '<p class="small">' + empty + '</p>'; return; }
-      var seen = null;
       rows.filter(function(t){ return t._anchored || !t.quote; }).forEach(function(t){
-        var title = t.sectionTitle || 'General';
-        if(title !== seen){ seen = title; add('rd-grp', title); }
         list.appendChild(make(t));
       });
       var loose = rows.filter(function(t){ return !t._anchored && t.quote; });
@@ -1286,6 +1310,12 @@ JS = r"""
     clearSel(); render(); toast('Highlighted — export when you are done');
   });
 
+  var PLACEHOLDER = edText.getAttribute('placeholder') || '';
+  var NO_BODY_HINT = {
+    clarify: 'Optional — the quoted text on its own is the ask.',
+    agree: 'Optional — saving files this as agreed and already closed.',
+    defer: 'Optional — say what should happen; Claude opens a backlog issue for it.'
+  };
   Object.keys(TAGS).forEach(function(k){
     var b = document.createElement('button');
     b.type = 'button'; b.textContent = TAGS[k]; b.dataset.k = k;
@@ -1297,6 +1327,7 @@ JS = r"""
     [].forEach.call(edTags.querySelectorAll('button'), function(x){
       x.classList.toggle('sel', x.dataset.k === k);
     });
+    edText.setAttribute('placeholder', NO_BODY_HINT[k] || PLACEHOLDER);
   }
   function openEd(quote, note){
     editing = note || null;
@@ -1324,15 +1355,19 @@ JS = r"""
                                 : 'Note updated — export when you are done');
       return;
     }
+    var closes = CLOSING_TAGS.indexOf(pendTag) >= 0;
     var n = { id:uid(), kind:'note', tag:pendTag, quote:pending ? pending.quote : '',
               sectionId:pending ? pending.sectionId : null,
               sectionTitle:pending ? pending.sectionTitle : 'General',
               context:pending ? pending.context : '',
               start:pending ? pending.start : null, body:body, author:'user',
-              ts:new Date().toISOString(), replies:[], status:'open', anchored:true };
+              ts:new Date().toISOString(), replies:[],
+              status: closes ? 'resolved' : 'open', anchored:true };
     drafts.notes.push(n); saveDrafts();
     anchor(n);
-    closeEd(); setTab('notes'); render(); toast('Note saved — export when you are done');
+    closeEd(); setTab('notes'); render();
+    toast(closes ? 'Filed as agreed and closed — export when you are done'
+                 : 'Note saved — export when you are done');
   });
   edText.addEventListener('keydown', function(e){
     if((e.metaKey || e.ctrlKey) && e.key === 'Enter') edSave.click();
@@ -1535,12 +1570,13 @@ PANEL = """
 
 HINT = """<div class="rd-hint"><b>This page is for you to mark up.</b> Select any sentence and two
 buttons appear: <b>&#128396; Highlight</b> just marks the passage, <b>&#128172; Note</b> attaches a
-question, a change, a concern or &ldquo;I don't understand this&rdquo;. The panel keeps them in
-separate tabs; you can edit or delete your own, and mark a thread resolved &mdash; closing a thread
-is yours to decide, never Claude's. Everything is kept in this browser until you hit
-<b>Export notes for Claude</b>, which saves a JSON file. Tell Claude when you're done and it will
-read them, reply in the panel, and rebuild the page. Use <b>&#8677;</b> in the panel header to hide
-it and centre the text.</div>"""
+question, a request to change something, a <b>defer to backlog</b> (Claude opens an issue for it),
+or a plain <b>agree</b> &mdash; which files itself closed and needs no typing. The panel keeps notes
+and highlights in separate tabs, newest first; you can edit or delete your own, and mark a thread
+resolved &mdash; closing a thread is yours to decide, never Claude's. Everything is kept in this
+browser until you hit <b>Export notes for Claude</b>, which saves a JSON file. Tell Claude when
+you're done and it will read them, reply in the panel, and rebuild the page. Use <b>&#8677;</b> in
+the panel header to hide it and centre the text.</div>"""
 
 
 def render_html(src_text, out_name, old_notes):
@@ -1576,7 +1612,9 @@ def render_html(src_text, out_name, old_notes):
             json.dumps({"slug": slug, "file": out_name, "title": title}, ensure_ascii=False),
         )
         .replace("__TAGS__", json.dumps(TAGS, ensure_ascii=False))
+        .replace("__LABELS__", json.dumps(dict(OLD_TAGS, **TAGS), ensure_ascii=False))
         .replace("__NO_BODY_TAGS__", json.dumps(sorted(NO_BODY_TAGS)))
+        .replace("__CLOSING_TAGS__", json.dumps(sorted(CLOSING_TAGS)))
     )
     payload = json.dumps(notes, ensure_ascii=False, indent=1)
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e")
@@ -1766,11 +1804,18 @@ def is_hl(n):
     return n.get("kind") == "highlight"
 
 
+def is_defer(n):
+    return not is_hl(n) and n.get("tag") == "defer"
+
+
 def cmd_list(a):
     notes = read_notes(read(a.doc), a.doc)
     hl = [n for n in notes if is_hl(n)]
+    dfr = [n for n in notes if is_defer(n)]
     if a.highlights:
         notes = hl
+    elif a.deferred:
+        notes = dfr
     else:
         notes = [n for n in notes if not is_hl(n)]
         if a.open_only:
@@ -1779,7 +1824,8 @@ def cmd_list(a):
         print(json.dumps(notes, ensure_ascii=False, indent=2))
         return
     if not notes:
-        print("no highlights" if a.highlights else "no notes")
+        print("no highlights" if a.highlights
+              else "nothing deferred" if a.deferred else "no notes")
     for n in notes:
         q = re.sub(r"\s+", " ", n.get("quote") or "").strip()
         if len(q) > 52:
@@ -1804,9 +1850,13 @@ def cmd_list(a):
     loose = [n["id"] for n in notes if not n.get("anchored", True)]
     if loose:
         print("! unanchored: %s" % " ".join(loose))
-    if hl and not a.highlights:
-        print("+ %d highlight(s) — no reply needed: reviewdoc.py list %s --highlights"
-              % (len(hl), a.doc))
+    if not (a.highlights or a.deferred):
+        if dfr:
+            print("+ %d deferred — each needs a backlog issue: reviewdoc.py list %s --deferred"
+                  % (len(dfr), a.doc))
+        if hl:
+            print("+ %d highlight(s) — no reply needed: reviewdoc.py list %s --highlights"
+                  % (len(hl), a.doc))
 
 
 def _save_notes(path, html, notes):
@@ -1894,6 +1944,8 @@ def main(argv=None):
     q.add_argument("--open-only", action="store_true")
     q.add_argument("--highlights", action="store_true",
                    help="list the reader's highlights instead of the note threads")
+    q.add_argument("--deferred", action="store_true",
+                   help="list only threads tagged defer (each wants a backlog issue)")
     q.add_argument("--json", action="store_true")
     q.set_defaults(fn=cmd_list)
 

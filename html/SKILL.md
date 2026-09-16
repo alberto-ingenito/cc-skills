@@ -30,6 +30,7 @@ reviewdoc.py build <src.md> --open           # write it, open it, then STOP and 
 reviewdoc.py import <doc.html> <doc-folder>/<slug>-notes.json
 reviewdoc.py list <doc.html>                 # note threads: ids, tags, quotes, reply counts
 reviewdoc.py list <doc.html> --json          # exact bodies, read this before answering
+reviewdoc.py list <doc.html> --deferred      # threads that each want a backlog issue
 reviewdoc.py list <doc.html> --highlights    # passages they marked without asking anything
 reviewdoc.py reply <doc.html> <id> "answer"  # threads stay open; only the reader closes them
 reviewdoc.py build <src.md>                  # re-render; notes + replies survive
@@ -50,7 +51,9 @@ Rules for the loop:
   next import. `--resolve` and the `resolve` command both refuse and exit
   non-zero. Answer, leave it open, let them close it.
 - Answer every open thread. `reply <doc> --all-open "text"` exists for a blanket
-  acknowledgement but is rarely the right thing.
+  acknowledgement but is rarely the right thing. `agree` threads arrive already
+  resolved and are not yours to answer; `defer` threads want a backlog issue —
+  see "Tags the user can apply".
 - The reader can also edit their own notes and delete their own replies in the
   panel. `import` takes their `tag`, `body` and `status` as authoritative, so a
   question may come back reworded — answer the version you just imported, and do
@@ -103,12 +106,13 @@ Decide per thread:
   document also needs. Edit the `.md`, rebuild, and make the reply a one-liner
   that points at the change: `Wrong as written — rewrote §4, it now says the
   patch runs before startup.` Do not paste the new prose into the reply as well.
-- Reply bodies linkify `§N` (section number) and `[label](#sec-id)` into
-  clickable jumps that scroll the document to that section and flash it. Use
-  `§N` — it is checked against the rendered section numbers at click time.
+- Reply bodies linkify `§N` (section number), `[label](#sec-id)` and bare URLs.
+  The first two scroll the document to that section and flash it — use `§N`, it
+  is checked against the rendered section numbers at click time.
 
-An `unclear` tag is the one case that always edits the corpus: the passage
-failed, so rewrite it in the source and let the reply just say where.
+A `change` tag always edits the corpus; so does any reply where the reader has
+shown the prose itself failed. Rewrite it in the source and let the reply just
+say where.
 
 Keep replies short. A reply longer than the passage it is about usually means
 the answer belonged in the document.
@@ -120,7 +124,8 @@ the answer belonged in the document.
 | `new <name> [--title T]` | writes `<name>.md` starter; refuses to overwrite |
 | `build <src.md> [-o out.html] [--open]` | default output is `<src>.html`; preserves notes in an existing output |
 | `import <doc.html> <notes.json>` | merges by id; re-running is a no-op. The reader's `kind`, `tag`, `body`, `context` and `status` overwrite what is in the doc, and `status: deleted` removes the thread |
-| `list <doc.html> [--open-only] [--json]` | note threads only; `!` marks unanchored; highlight count printed at the end |
+| `list <doc.html> [--open-only] [--json]` | note threads only; `!` marks unanchored; deferred and highlight counts printed at the end |
+| `list <doc.html> --deferred [--json]` | only `defer` threads — the backlog queue |
 | `list <doc.html> --highlights [--json]` | the reader's highlights instead |
 | `reply <doc.html> <id> "text"` | appends a Claude reply; the thread stays open |
 | `reply <doc.html> --all-open "text"` | every non-resolved thread; skips highlights |
@@ -253,10 +258,53 @@ warn the user about this — just do not rely on it.
 
 ## Tags the user can apply
 
-`question` ❓, `clarify` 🔍, `change` ✏️, `concern` ⚠️, `unclear` 🤷, `agree` 👍. Treat
-`unclear` as a defect in your writing, not in their understanding: rewrite that
-passage in the source before rebuilding, and say so in the reply. `clarify` is a
-lightweight "expand on this" — the user can apply it to a highlight without
-typing a note body, so the quoted text alone is the ask; answer it in the panel
-like any other thread, and only touch the source if the gap is one every reader
-would hit.
+Five, and each wants a different response:
+
+| Tag | What it means | What you do |
+|---|---|---|
+| `question` ❓ | a real question | answer it — panel or corpus, per the rule above |
+| `clarify` 🔍 | "expand on this"; body optional, the quote alone is the ask | answer in the panel; only touch the source if every reader would hit the same gap |
+| `change` ✏️ | they want the plan or the prose different | make the change, then say where in one line |
+| `defer` 📥 | valid, but not now | open a backlog issue, reply with its link (see below) |
+| `agree` 👍 | acknowledgement; body optional | **nothing** — it arrives already resolved |
+
+`agree` files itself as `status: resolved`, so `--all-open` skips it and it does
+not appear in your work queue. Do not reply to one to say "thanks" or "noted";
+that is noise in a thread the reader already closed.
+
+Older documents may still carry `concern` ⚠️ or `unclear` 🤷 from before those
+tags were retired. They still render with their labels; treat `concern` as a
+`question` and `unclear` as a defect in your writing — rewrite that passage in
+the source and say so in the reply.
+
+### `defer` — open a backlog issue
+
+A `defer` thread means the point stands but is out of scope for now. It wants a
+tracked issue, not an argument.
+
+1. Work out the project. The plan document lives inside a git repo — the one you
+   were invoked in. Run `glab` **from that repo** so it resolves the project from
+   the remote, and check it first: `glab repo view 2>/dev/null | head -3`.
+2. **Confirm the target project with the user once per document**, before filing
+   the first issue. An issue is outward-facing and notifies people; getting the
+   project wrong is not something you can quietly undo. One confirmation covers
+   every `defer` in that round.
+3. File one issue per deferred thread. Title from the quoted passage or their
+   note; body should stand on its own for someone who has not read the plan —
+   what was proposed, why it was deferred, and a link or path to the document.
+
+   ```bash
+   glab issue create --title "..." --description "..." --yes
+   ```
+
+4. Reply in the thread with the issue URL and nothing else: `Deferred —
+   <url>`. Panel replies linkify bare URLs, so it is clickable. Leave the thread
+   open; the reader closes it once they are happy it is tracked.
+5. Report every issue you filed, with its URL, in your chat message too.
+
+`reviewdoc.py list <doc.html> --deferred` is the queue. Plain `list` prints a
+count and points at it.
+
+If `glab` is missing or not authenticated for that host, do not invent an issue
+number. Say so, reply in the thread that the deferral is noted but untracked, and
+let the user decide.
