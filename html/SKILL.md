@@ -263,7 +263,7 @@ Five, and each wants a different response:
 | Tag | What it means | What you do |
 |---|---|---|
 | `question` ❓ | a real question | answer it — panel or corpus, per the rule above |
-| `clarify` 🔍 | "expand on this"; body optional, the quote alone is the ask | answer in the panel; only touch the source if every reader would hit the same gap |
+| `clarify` 🔍 | "I don't know this term"; usually filed on a word or phrase with no body at all | define it in the panel — see below |
 | `change` ✏️ | they want the plan or the prose different | make the change, then say where in one line |
 | `defer` 📥 | valid, but not now | open a backlog issue, reply with its link (see below) |
 | `agree` 👍 | acknowledgement; body optional | **nothing** — it arrives already resolved |
@@ -276,6 +276,30 @@ Older documents may still carry `concern` ⚠️ or `unclear` 🤷 from before t
 tags were retired. They still render with their labels; treat `concern` as a
 `question` and `unclear` as a defect in your writing — rewrite that passage in
 the source and say so in the reply.
+
+### `clarify` — the reader hit a word they don't know
+
+This is the tag they reach for most, and it is nearly always a bare highlight of
+a term with no note body: they select the word, press **🔍 Explain**, done. The
+quoted text *is* the whole question. Treat an empty body as normal, never as a
+mistake or an empty note.
+
+- **Answer in the panel, not the document.** A definition of one term does not
+  belong bolted into the plan; it belongs attached to the word that prompted it.
+  The exception is when the term is load-bearing for the whole document — then
+  define it once in the prose and point at it with `§N`.
+- **Pitch it at their actual level for that specific domain.** Check the user's
+  CLAUDE.md. A term from a field they know well gets one plain sentence and no
+  primer. A term from a field they have flagged as weak gets built up properly:
+  what it is, why it exists, and a concrete comparison if the mechanism is
+  abstract to them. Do not give a one-line gloss for something that genuinely
+  needs three sentences, and do not lecture about something they use daily.
+- **Define, don't defend.** They are not challenging the passage. Do not
+  re-argue the point or rewrite the section; just say what the word means and how
+  it is being used here.
+- If the same term drew a `clarify` and it appears throughout the document, that
+  is a signal your writing assumed too much. Consider defining it on first use
+  next time — but say so in the reply rather than silently restructuring.
 
 ### `defer` — open a backlog issue
 

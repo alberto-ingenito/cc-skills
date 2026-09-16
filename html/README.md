@@ -2,7 +2,7 @@
 
 Turns a markdown file into a **single self-contained HTML review document** with a
 Word-style threaded comment panel on the right. You select a sentence and either
-highlight it or tag a note (question / clarify / change this / defer to backlog /
+highlight it or tag a note (question / explain this / change this / defer to backlog /
 agree); Claude's answers come back stacked underneath your comment in the same thread.
 
 One Python file, stdlib only. No install, no npm, no build step, no server, no
@@ -76,8 +76,9 @@ remembered per document in `localStorage`. Clicking a thread jumps to its mark;
 clicking a mark opens its thread. Resolved threads dim and fold. Printing hides the
 whole comment layer.
 
-Selecting text offers two buttons. **🖍 Highlight** just marks the passage — amber
-wash, no wording needed. **💬 Note** opens the tagged comment editor; a commented
+Selecting text offers three buttons. **🖍 Highlight** just marks the passage — amber
+wash, no wording needed. **🔍 Explain** files a one-click "what does this mean?" on the
+selected word, nothing to type. **💬 Note** opens the tagged comment editor; a commented
 passage gets the blue underline instead. The panel has a tab for each, with a
 **Show open only** checkbox on the Notes tab. A highlight can be promoted to a note
 later from its card.
@@ -93,7 +94,7 @@ Five note tags:
 | | |
 |---|---|
 | **❓ Question** | a question to answer |
-| **🔍 Clarify** | "expand on this" — needs no text, the quote is the ask |
+| **🔍 Explain this** | you don't know the term — needs no text, the word is the question. Also the **🔍 Explain** button on the selection bar |
 | **✏️ Change this** | you want the plan or the wording different |
 | **📥 Defer to backlog** | valid but not now — Claude opens a GitLab issue and replies with the link |
 | **👍 Agree** | needs no text, and files itself **already closed** so it never lands in Claude's queue |

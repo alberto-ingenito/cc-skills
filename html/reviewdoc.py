@@ -19,7 +19,7 @@ from html.parser import HTMLParser
 
 TAGS = {
     "question": "❓ Question",
-    "clarify": "\U0001f50d Clarify",
+    "clarify": "\U0001f50d Explain this",
     "change": "✏️ Change this",
     "defer": "\U0001f4e5 Defer to backlog",
     "agree": "\U0001f44d Agree",
@@ -1298,21 +1298,28 @@ JS = r"""
     openEd(pending.quote);
     clearSel();
   });
-  bar.querySelector('[data-hl]').addEventListener('click', function(){
+  /* one-click filings: no modal, no typing — the quoted text is the whole point */
+  function quick(kind, tag, done){
     var p = capture();
     if(!p) return;
-    var n = { id:uid(), kind:'highlight', tag:'highlight', quote:p.quote,
+    var n = { id:uid(), kind:kind, tag:tag, quote:p.quote,
               sectionId:p.sectionId, sectionTitle:p.sectionTitle, context:p.context,
               start:p.start, body:'', author:'user', ts:new Date().toISOString(),
               replies:[], status:'open', anchored:true };
     drafts.notes.push(n); saveDrafts();
     anchor(n);
-    clearSel(); render(); toast('Highlighted — export when you are done');
+    clearSel(); render(); toast(done);
+  }
+  bar.querySelector('[data-hl]').addEventListener('click', function(){
+    quick('highlight', 'highlight', 'Highlighted — export when you are done');
+  });
+  bar.querySelector('[data-clarify]').addEventListener('click', function(){
+    quick('note', 'clarify', 'Claude will explain this — export when you are done');
   });
 
   var PLACEHOLDER = edText.getAttribute('placeholder') || '';
   var NO_BODY_HINT = {
-    clarify: 'Optional — the quoted text on its own is the ask.',
+    clarify: 'Optional — Claude explains the quoted text as it stands.',
     agree: 'Optional — saving files this as agreed and already closed.',
     defer: 'Optional — say what should happen; Claude opens a backlog issue for it.'
   };
@@ -1536,6 +1543,7 @@ JS = r"""
 PANEL = """
 <div id="rd-bar">
   <button type="button" data-hl>&#128396; Highlight</button>
+  <button type="button" data-clarify>&#128269; Explain</button>
   <button type="button" data-note>&#128172; Note</button>
 </div>
 
@@ -1569,7 +1577,8 @@ PANEL = """
 """
 
 HINT = """<div class="rd-hint"><b>This page is for you to mark up.</b> Select any sentence and two
-buttons appear: <b>&#128396; Highlight</b> just marks the passage, <b>&#128172; Note</b> attaches a
+buttons appear: <b>&#128396; Highlight</b> just marks the passage, <b>&#128269; Explain</b> asks
+Claude what a word or phrase means (one click, nothing to type), and <b>&#128172; Note</b> attaches a
 question, a request to change something, a <b>defer to backlog</b> (Claude opens an issue for it),
 or a plain <b>agree</b> &mdash; which files itself closed and needs no typing. The panel keeps notes
 and highlights in separate tabs, newest first; you can edit or delete your own, and mark a thread
