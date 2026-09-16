@@ -265,7 +265,7 @@ Five, and each wants a different response:
 | `question` ❓ | a real question | answer it — panel or corpus, per the rule above |
 | `clarify` 🔍 | "I don't know this term"; usually filed on a word or phrase with no body at all | define it in the panel — see below |
 | `change` ✏️ | they want the plan or the prose different | make the change, then say where in one line |
-| `defer` 📥 | valid, but not now | open a backlog issue, reply with its link (see below) |
+| `defer` 📥 | valid, but not now | open an issue on the repo's tracker, reply with its link (see below) |
 | `agree` 👍 | acknowledgement; body optional | **nothing** — it arrives already resolved |
 
 `agree` files itself as `status: resolved`, so `--all-open` skips it and it does
@@ -306,29 +306,31 @@ mistake or an empty note.
 A `defer` thread means the point stands but is out of scope for now. It wants a
 tracked issue, not an argument.
 
-1. Work out the project. The plan document lives inside a git repo — the one you
-   were invoked in. Run `glab` **from that repo** so it resolves the project from
-   the remote, and check it first: `glab repo view 2>/dev/null | head -3`.
-2. **Confirm the target project with the user once per document**, before filing
+1. **Find the tracker.** The plan document lives inside a git repo — the one you
+   were invoked in. `git remote -v` in that repo tells you the host and project.
+2. **Use whatever you actually have** to create the issue there. That might be a
+   configured MCP server for that host, a CLI already installed and authenticated
+   (`glab` for GitLab, `gh` for GitHub), or something else in this environment. No
+   tool is mandated — check what is available for *that* host and use it. Do not
+   reach for a different project because it is easier to reach.
+3. **Confirm the target project with the user once per document**, before filing
    the first issue. An issue is outward-facing and notifies people; getting the
    project wrong is not something you can quietly undo. One confirmation covers
    every `defer` in that round.
-3. File one issue per deferred thread. Title from the quoted passage or their
-   note; body should stand on its own for someone who has not read the plan —
-   what was proposed, why it was deferred, and a link or path to the document.
+4. File one issue per deferred thread. Title from the quoted passage or their
+   note; the body should stand on its own for someone who has not read the plan —
+   what was proposed, why it was deferred, and a path or link to the document.
+5. **Reply in the thread with the issue link.** Just the link and a couple of
+   words: `Deferred — <url>`. Panel replies linkify bare URLs, so it is
+   clickable. Leave the thread open; the reader closes it once satisfied it is
+   tracked. A deferred thread with no link in it is an unfinished job.
+6. Report every issue you filed, with its URL, in your chat message too.
 
-   ```bash
-   glab issue create --title "..." --description "..." --yes
-   ```
-
-4. Reply in the thread with the issue URL and nothing else: `Deferred —
-   <url>`. Panel replies linkify bare URLs, so it is clickable. Leave the thread
-   open; the reader closes it once they are happy it is tracked.
-5. Report every issue you filed, with its URL, in your chat message too.
+**If you cannot create the issue** — no tool for that host, not authenticated,
+host unreachable, or the repo has no tracker — then do not invent an issue
+number, a URL, or an ID. Tell the user plainly what is missing, reply in the
+thread that the deferral is noted but *not* tracked yet, and let them decide
+whether to file it themselves or point you at another route.
 
 `reviewdoc.py list <doc.html> --deferred` is the queue. Plain `list` prints a
 count and points at it.
-
-If `glab` is missing or not authenticated for that host, do not invent an issue
-number. Say so, reply in the thread that the deferral is noted but untracked, and
-let the user decide.
