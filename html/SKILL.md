@@ -258,12 +258,14 @@ warn the user about this — just do not rely on it.
 
 ## Tags the user can apply
 
-Five, and each wants a different response:
+Five, and each wants a different response. `clarify` is filed from the **🔍
+Clarify** button on the selection bar in one click; the other four come from the
+note editor's picker, which no longer offers `clarify` at all:
 
 | Tag | What it means | What you do |
 |---|---|---|
 | `question` ❓ | a real question | answer it — panel or corpus, per the rule above |
-| `clarify` 🔍 | "I don't know this term"; usually filed on a word or phrase with no body at all | define it in the panel — see below |
+| `clarify` 🔍 | "I don't know this term"; one click from the bar, almost always with no body at all | define it in the panel — see below |
 | `change` ✏️ | they want the plan or the prose different | make the change, then say where in one line |
 | `defer` 📥 | valid, but not now | open an issue on the repo's tracker, reply with its link (see below) |
 | `agree` 👍 | acknowledgement; body optional | **nothing** — it arrives already resolved |
@@ -274,10 +276,10 @@ that is noise in a thread the reader already closed.
 
 ### `clarify` — the reader hit a word they don't know
 
-This is the tag they reach for most, and it is nearly always a bare highlight of
-a term with no note body: they select the word, press **🔍 Clarify**, done. The
-quoted text *is* the whole question. Treat an empty body as normal, never as a
-mistake or an empty note.
+This is the tag they reach for most, and it has its own button: they select the
+word, press **🔍 Clarify**, done — no editor, no typing. So it arrives with an
+empty body nearly every time, and the quoted text *is* the whole question. Treat
+an empty body as normal, never as a mistake or an empty note.
 
 - **Answer in the panel, not the document.** A definition of one term does not
   belong bolted into the plan; it belongs attached to the word that prompted it.

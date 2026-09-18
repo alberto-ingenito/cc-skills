@@ -100,7 +100,7 @@ Five note tags:
 | | |
 |---|---|
 | **❓ Question** | a question to answer |
-| **🔍 Clarify this** | you don't know the term — needs no text, the word is the question. Also the **🔍 Clarify** button on the selection bar |
+| **🔍 Clarify this** | you don't know the term — the word is the question. Filed straight from the **🔍 Clarify** button, so it is not in the editor's picker |
 | **✏️ Change this** | you want the plan or the wording different |
 | **📥 Defer to backlog** | valid but not now — Claude opens an issue on whatever tracker the repo uses and replies with the link, or tells you if it can't |
 | **👍 Agree** | needs no text, and files itself **already closed** so it never lands in Claude's queue |

@@ -17,12 +17,19 @@ import sys
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+# Offered in the note editor's tag picker, in this order.
 TAGS = {
     "question": "❓ Question",
-    "clarify": "\U0001f50d Clarify this",
     "change": "✏️ Change this",
     "defer": "\U0001f4e5 Defer to backlog",
     "agree": "\U0001f44d Agree",
+}
+
+# Filed from the selection bar in one click, so deliberately absent from the
+# picker — but still current tags that need a label.
+BAR_TAGS = {
+    "clarify": "\U0001f50d Clarify this",
+    "highlight": "\U0001f58d Highlight",
 }
 
 # Tags that can be submitted without a note body (the quote alone is the point).
@@ -732,6 +739,7 @@ CSS = r"""
   .rd-tags button{font:600 12.5px/1 inherit;background:var(--card2);color:var(--ink);
     border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer}
   .rd-tags button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .rd-tags button:disabled{cursor:default;opacity:.8}
   #rd-ed{position:fixed;inset:auto 12px 12px 12px;max-width:520px;margin:0 auto;z-index:80;
     background:var(--card);border:1px solid var(--line);border-radius:15px;padding:16px;display:none;
     box-shadow:0 12px 40px rgba(0,0,0,.45)}
@@ -791,6 +799,7 @@ JS = r"""
   "use strict";
   var DOC = __DOC__;
   var TAGS = __TAGS__;            /* offered in the picker, in this order */
+  var LABELS = __LABELS__;        /* display labels, including the bar-only tags */
   var NO_BODY_TAGS = __NO_BODY_TAGS__;
   var CLOSING_TAGS = __CLOSING_TAGS__;
   var KEY = 'reviewdoc:' + DOC.slug;
@@ -865,7 +874,7 @@ JS = r"""
     if(t && t.status !== 'deleted') anchor(t);
   }
   function uid(){ return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-  function label(k){ return TAGS[k] || k; }
+  function label(k){ return LABELS[k] || TAGS[k] || k; }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function toast(m){ toastEl.textContent = m; toastEl.style.display = 'block';
@@ -1346,6 +1355,17 @@ JS = r"""
   });
   function selTag(k){
     pendTag = k;
+    var extra = edTags.querySelector('[data-extra]');
+    if(extra) edTags.removeChild(extra);
+    if(!TAGS[k]){
+      /* filed from the selection bar, so not in the picker: show what it is
+         rather than leaving nothing lit, but do not offer it as a choice */
+      extra = document.createElement('button');
+      extra.type = 'button'; extra.disabled = true;
+      extra.dataset.extra = '1'; extra.dataset.k = k;
+      extra.textContent = label(k);
+      edTags.insertBefore(extra, edTags.firstChild);
+    }
     [].forEach.call(edTags.querySelectorAll('button'), function(x){
       x.classList.toggle('sel', x.dataset.k === k);
     });
@@ -1354,7 +1374,9 @@ JS = r"""
   function openEd(quote, note){
     editing = note || null;
     var conv = !!note && note.kind === 'highlight';   /* highlight -> note */
-    selTag(note && TAGS[note.tag] ? note.tag : 'question');
+    /* keep whatever tag the note already has, even one the picker does not offer,
+       so editing the body of a Clarify note never silently re-tags it */
+    selTag(conv || !note || !note.tag ? 'question' : note.tag);
     if(quote){ edQuote.textContent = '“' + quote + '”'; edQuote.style.display = 'block'; }
     else edQuote.style.display = 'none';
     edText.value = note ? (note.body || '') : '';
@@ -1695,6 +1717,7 @@ def render_html(src_text, out_name, old_notes):
             json.dumps({"slug": slug, "file": out_name, "title": title}, ensure_ascii=False),
         )
         .replace("__TAGS__", json.dumps(TAGS, ensure_ascii=False))
+        .replace("__LABELS__", json.dumps(dict(BAR_TAGS, **TAGS), ensure_ascii=False))
         .replace("__NO_BODY_TAGS__", json.dumps(sorted(NO_BODY_TAGS)))
         .replace("__CLOSING_TAGS__", json.dumps(sorted(CLOSING_TAGS)))
     )
