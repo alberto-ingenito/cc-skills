@@ -139,7 +139,7 @@ error on bad input.
 
 Front matter (all optional): `title`, `subtitle`, `meta` (small mono byline),
 `slug` (controls the export filename, defaults to the output stem),
-`hint: false` (suppresses the "this page is for you to mark up" box).
+`hint: false` (drops the "ⓘ How to use this page" button and its dialog).
 
 ```
 ---
@@ -280,7 +280,7 @@ the source and say so in the reply.
 ### `clarify` — the reader hit a word they don't know
 
 This is the tag they reach for most, and it is nearly always a bare highlight of
-a term with no note body: they select the word, press **🔍 Explain**, done. The
+a term with no note body: they select the word, press **🔍 Clarify**, done. The
 quoted text *is* the whole question. Treat an empty body as normal, never as a
 mistake or an empty note.
 

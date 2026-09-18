@@ -2,7 +2,7 @@
 
 Turns a markdown file into a **single self-contained HTML review document** with a
 Word-style threaded comment panel on the right. You select a sentence and either
-highlight it or tag a note (question / explain this / change this / defer to backlog /
+highlight it or tag a note (question / clarify this / change this / defer to backlog /
 agree); Claude's answers come back stacked underneath your comment in the same thread.
 
 One Python file, stdlib only. No install, no npm, no build step, no server, no
@@ -68,6 +68,12 @@ is kept and listed under **Unanchored** rather than dropped.
 
 ## Reading it
 
+Two buttons sit at the top of the page, above the title. **ⓘ How to use this page**
+opens the instructions as a dialog — they used to be a permanent box under the title,
+which cost a screenful on every read. **⤢ Full screen** puts the document into browser
+fullscreen (standard API in Chrome, `webkit`-prefixed in Safari); the button is hidden
+if neither exists.
+
 Panel is docked on the right on a desktop and collapses to a drawer with a floating
 button under 900px, so it is usable on a phone. The **⇥** button in the panel header
 hides it on a desktop too, dropping the right gutter so the document centres on the
@@ -77,7 +83,7 @@ clicking a mark opens its thread. Resolved threads dim and fold. Printing hides 
 whole comment layer.
 
 Selecting text offers three buttons. **🖍 Highlight** just marks the passage — amber
-wash, no wording needed. **🔍 Explain** files a one-click "what does this mean?" on the
+wash, no wording needed. **🔍 Clarify** files a one-click "what does this mean?" on the
 selected word, nothing to type. **💬 Note** opens the tagged comment editor; a commented
 passage gets the blue underline instead. The panel has a tab for each, with a
 **Show open only** checkbox on the Notes tab. A highlight can be promoted to a note
@@ -94,7 +100,7 @@ Five note tags:
 | | |
 |---|---|
 | **❓ Question** | a question to answer |
-| **🔍 Explain this** | you don't know the term — needs no text, the word is the question. Also the **🔍 Explain** button on the selection bar |
+| **🔍 Clarify this** | you don't know the term — needs no text, the word is the question. Also the **🔍 Clarify** button on the selection bar |
 | **✏️ Change this** | you want the plan or the wording different |
 | **📥 Defer to backlog** | valid but not now — Claude opens an issue on whatever tracker the repo uses and replies with the link, or tells you if it can't |
 | **👍 Agree** | needs no text, and files itself **already closed** so it never lands in Claude's queue |

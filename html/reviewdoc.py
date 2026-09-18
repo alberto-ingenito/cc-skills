@@ -19,7 +19,7 @@ from html.parser import HTMLParser
 
 TAGS = {
     "question": "❓ Question",
-    "clarify": "\U0001f50d Explain this",
+    "clarify": "\U0001f50d Clarify this",
     "change": "✏️ Change this",
     "defer": "\U0001f4e5 Defer to backlog",
     "agree": "\U0001f44d Agree",
@@ -618,9 +618,21 @@ CSS = r"""
   hr{border:none;border-top:1px solid var(--line);margin:48px 0}
   .an{color:var(--dim);font-style:italic;border-left:3px solid var(--accent);padding-left:14px;margin:16px 0}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .rd-hint{background:color-mix(in srgb,var(--accent) 12%,transparent);
-    border:1px dashed color-mix(in srgb,var(--accent) 50%,transparent);
-    border-radius:12px;padding:16px 20px;margin:0 0 30px;font-size:15px}
+
+  /* ---------- top toolbar ---------- */
+  .rd-tools{display:flex;justify-content:flex-end;gap:8px;padding:16px 0 0;flex-wrap:wrap}
+  .rd-tools button{display:inline-flex;align-items:center;gap:7px;font:600 13px/1 inherit;
+    background:var(--card);color:var(--dim);border:1px solid var(--line);border-radius:999px;
+    padding:8px 14px;cursor:pointer}
+  .rd-tools button:hover{color:var(--ink);border-color:var(--accent)}
+  /* the how-to is the only cue that the page is annotatable — make it read as one */
+  .rd-tools #rd-howto{color:var(--accent);
+    border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+  .rd-tools button[hidden]{display:none}
+  .rd-tools + section > header{padding-top:26px}
+  /* the fullscreen element is the root, which has no background of its own */
+  html:fullscreen{background:var(--bg);overflow:auto}
+  html:-webkit-full-screen{background:var(--bg);overflow:auto}
 
   /* ---------- review layer ---------- */
   /* a commented passage reads as a link (accent underline); a plain highlight
@@ -748,6 +760,18 @@ CSS = r"""
   #rd-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:90;
     background:var(--good);color:#fff;padding:12px 20px;border-radius:10px;font:650 14px/1 inherit;
     display:none;box-shadow:0 6px 22px rgba(0,0,0,.35);text-align:center;max-width:88vw}
+  #rd-help{position:fixed;inset:0;z-index:85;display:none;align-items:center;justify-content:center;
+    padding:20px;background:rgba(0,0,0,.5)}
+  #rd-help.open{display:flex}
+  #rd-help .box{background:var(--card);border:1px solid var(--line);border-radius:15px;
+    padding:22px 24px;width:100%;max-width:620px;max-height:84vh;overflow:auto;
+    box-shadow:0 12px 40px rgba(0,0,0,.45)}
+  #rd-help h3{margin:0 0 12px;font-size:19px}
+  #rd-help p,#rd-help li{font-size:14.5px;line-height:1.6}
+  #rd-help ul{margin:0 0 14px}
+  #rd-help .row{display:flex;justify-content:flex-end;margin-top:6px}
+  #rd-help .row button{font:650 14px/1 inherit;padding:11px 20px;border-radius:9px;cursor:pointer;
+    background:var(--accent);color:#fff;border:none}
   @media(min-width:901px){
     body{padding-right:var(--panw);transition:padding-right .22s ease}
     /* panel collapsed: drop the gutter so .wrap centres on the full viewport */
@@ -764,7 +788,7 @@ CSS = r"""
     .rd-hide{display:none}
   }
   @media print{
-    #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,.rd-hint{display:none!important}
+    #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,#rd-help,.rd-tools{display:none!important}
     body{padding-right:0}
     mark.rd-hl{background:none;border-bottom:1px solid #999}
   }
@@ -1314,12 +1338,12 @@ JS = r"""
     quick('highlight', 'highlight', 'Highlighted — export when you are done');
   });
   bar.querySelector('[data-clarify]').addEventListener('click', function(){
-    quick('note', 'clarify', 'Claude will explain this — export when you are done');
+    quick('note', 'clarify', 'Claude will clarify this — export when you are done');
   });
 
   var PLACEHOLDER = edText.getAttribute('placeholder') || '';
   var NO_BODY_HINT = {
-    clarify: 'Optional — Claude explains the quoted text as it stands.',
+    clarify: 'Optional — Claude clarifies the quoted text as it stands.',
     agree: 'Optional — saving files this as agreed and already closed.',
     defer: 'Optional — say what should happen; Claude opens a backlog issue for it.'
   };
@@ -1384,6 +1408,42 @@ JS = r"""
     var m = e.target.closest && e.target.closest('mark.rd-hl');
     if(m) focusThread(m.dataset.noteId);
   });
+  /* ---------- top toolbar: how-to + full screen ---------- */
+  var help = document.getElementById('rd-help'),
+      howBtn = document.getElementById('rd-howto'),
+      fsBtn = document.getElementById('rd-fs'),
+      root = document.documentElement,
+      reqFs = root.requestFullscreen || root.webkitRequestFullscreen;
+
+  function showHelp(on){ if(help) help.classList.toggle('open', !!on); }
+  if(howBtn) howBtn.addEventListener('click', function(){ showHelp(true); });
+  if(help) help.addEventListener('click', function(e){
+    /* the backdrop is the overlay itself; anything inside .box keeps it open */
+    if(e.target === help || (e.target.closest && e.target.closest('[data-help-close]')))
+      showHelp(false);
+  });
+
+  /* Safari still only has the webkit-prefixed half of the Fullscreen API */
+  function fsOn(){ return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+  function syncFs(){ if(fsBtn) fsBtn.textContent = fsOn() ? '⤡ Exit full screen'
+                                                          : '⤢ Full screen'; }
+  if(fsBtn && !reqFs) fsBtn.hidden = true;
+  else if(fsBtn){
+    fsBtn.addEventListener('click', function(){
+      var call;
+      try{
+        if(fsOn()){
+          var exit = document.exitFullscreen || document.webkitExitFullscreen;
+          call = exit ? exit.call(document) : null;
+        } else call = reqFs.call(root);
+      }catch(err){ toast('Full screen is not available here'); return; }
+      Promise.resolve(call).catch(function(){ toast('The browser refused full screen'); });
+    });
+    document.addEventListener('fullscreenchange', syncFs);
+    document.addEventListener('webkitfullscreenchange', syncFs);
+    syncFs();
+  }
+
   /* ---------- panel collapse (desktop) + view state ---------- */
   var UIKEY = KEY + ':ui', ui = {};
   try{
@@ -1415,7 +1475,8 @@ JS = r"""
   });
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape') return;
-    if(ed.classList.contains('open')) closeEd();
+    if(help && help.classList.contains('open')) showHelp(false);
+    else if(ed.classList.contains('open')) closeEd();
     else panel.classList.remove('open');
   });
   [].forEach.call(panel.querySelectorAll('.rd-tabs button'), function(b){
@@ -1543,7 +1604,7 @@ JS = r"""
 PANEL = """
 <div id="rd-bar">
   <button type="button" data-hl>&#128396; Highlight</button>
-  <button type="button" data-clarify>&#128269; Explain</button>
+  <button type="button" data-clarify>&#128269; Clarify</button>
   <button type="button" data-note>&#128172; Note</button>
 </div>
 
@@ -1576,16 +1637,40 @@ PANEL = """
 <div id="rd-toast"></div>
 """
 
-HINT = """<div class="rd-hint"><b>This page is for you to mark up.</b> Select any sentence and two
-buttons appear: <b>&#128396; Highlight</b> just marks the passage, <b>&#128269; Explain</b> asks
-Claude what a word or phrase means (one click, nothing to type), and <b>&#128172; Note</b> attaches a
-question, a request to change something, a <b>defer to backlog</b> (Claude opens an issue for it),
-or a plain <b>agree</b> &mdash; which files itself closed and needs no typing. The panel keeps notes
-and highlights in separate tabs, newest first; you can edit or delete your own, and mark a thread
-resolved &mdash; closing a thread is yours to decide, never Claude's. Everything is kept in this
-browser until you hit <b>Export notes for Claude</b>, which saves a JSON file. Tell Claude when
-you're done and it will read them, reply in the panel, and rebuild the page. Use <b>&#8677;</b> in
-the panel header to hide it and centre the text.</div>"""
+HELP = """
+<div id="rd-help" role="dialog" aria-modal="true" aria-label="How to use this page">
+  <div class="box">
+    <h3>This page is for you to mark up</h3>
+    <p>Select any sentence in the document and a small bar appears with three buttons:</p>
+    <ul>
+      <li><b>&#128396; Highlight</b> &mdash; marks the passage in amber. Nothing to type.</li>
+      <li><b>&#128269; Clarify</b> &mdash; asks Claude what a word or phrase means. One click,
+          the quoted text is the whole question.</li>
+      <li><b>&#128172; Note</b> &mdash; attaches a question, a request to change something, a
+          <b>defer to backlog</b> (Claude opens an issue for it), or a plain <b>agree</b>, which
+          files itself closed and needs no typing.</li>
+    </ul>
+    <p>The review panel keeps notes and highlights in separate tabs, newest first. You can edit or
+    delete your own, and mark a thread resolved &mdash; closing a thread is yours to decide, never
+    Claude's.</p>
+    <p>Everything stays in this browser until you press <b>&#10003; Export notes for Claude</b>,
+    which saves a JSON file. Tell Claude when you're done and it will read your notes, reply in the
+    panel, and rebuild the page.</p>
+    <p class="small">&#8677; in the panel header hides the panel and centres the text.
+    <b>&#10530; Full screen</b> at the top of the page hides the browser chrome.</p>
+    <div class="row"><button type="button" data-help-close>Got it</button></div>
+  </div>
+</div>
+"""
+
+
+def toolbar(with_help):
+    """The row of page-level buttons above the title."""
+    bits = []
+    if with_help:
+        bits.append('<button type="button" id="rd-howto">&#9432; How to use this page</button>')
+    bits.append('<button type="button" id="rd-fs">&#10530; Full screen</button>')
+    return '<div class="rd-tools">%s</div>' % "".join(bits)
 
 
 def render_html(src_text, out_name, old_notes):
@@ -1600,13 +1685,14 @@ def render_html(src_text, out_name, old_notes):
     if meta.get("meta"):
         head.append('<p class="meta">%s</p>' % inline(meta["meta"]))
     head.append("</header>")
-    if meta.get("hint", "").lower() not in ("false", "no", "off"):
-        head.append(HINT)
 
     sid, stitle, body = sections[0]
     sections[0] = (sid, stitle, "".join(head) + body)
 
-    body_html = "".join(
+    # the toolbar sits inside .wrap but outside every section, so its button
+    # labels never land in the text a note is anchored against
+    with_help = meta.get("hint", "").lower() not in ("false", "no", "off")
+    body_html = toolbar(with_help) + "".join(
         '<section class="rd-sec" id="%s" data-title="%s">%s<!--/rd-sec--></section>'
         % (sid, esc(stitle), body)
         for sid, stitle, body in sections
@@ -1652,7 +1738,7 @@ __NOTES__
         ("__TITLE__", esc(re.sub(r"<[^>]+>", "", inline(title)))),
         ("__CSS__", CSS),
         ("__BODY__", body_html),
-        ("__PANEL__", PANEL),
+        ("__PANEL__", PANEL + (HELP if with_help else "")),
         ("__NOTES__", payload),
         ("__JS__", js),
     ):
