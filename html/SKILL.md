@@ -272,11 +272,6 @@ Five, and each wants a different response:
 not appear in your work queue. Do not reply to one to say "thanks" or "noted";
 that is noise in a thread the reader already closed.
 
-Older documents may still carry `concern` ⚠️ or `unclear` 🤷 from before those
-tags were retired. They still render with their labels; treat `concern` as a
-`question` and `unclear` as a defect in your writing — rewrite that passage in
-the source and say so in the reply.
-
 ### `clarify` — the reader hit a word they don't know
 
 This is the tag they reach for most, and it is nearly always a bare highlight of

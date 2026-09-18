@@ -25,14 +25,6 @@ TAGS = {
     "agree": "\U0001f44d Agree",
 }
 
-# Retired tags. Not offered any more, but old documents still contain them and
-# should keep rendering with a proper label instead of a bare key.
-OLD_TAGS = {
-    "concern": "⚠️ Concern",
-    "unclear": "\U0001f937 Don't understand",
-    "highlight": "\U0001f58d Highlight",
-}
-
 # Tags that can be submitted without a note body (the quote alone is the point).
 NO_BODY_TAGS = {"clarify", "agree", "defer"}
 # ...and tags that file themselves as settled rather than as an open question.
@@ -799,7 +791,6 @@ JS = r"""
   "use strict";
   var DOC = __DOC__;
   var TAGS = __TAGS__;            /* offered in the picker, in this order */
-  var LABELS = __LABELS__;        /* display labels, including retired tags */
   var NO_BODY_TAGS = __NO_BODY_TAGS__;
   var CLOSING_TAGS = __CLOSING_TAGS__;
   var KEY = 'reviewdoc:' + DOC.slug;
@@ -856,7 +847,7 @@ JS = r"""
       if(!drafts.notes.length && !drafts.replies.length && !Object.keys(drafts.patch).length)
         localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, JSON.stringify(
-        {v:1, notes:drafts.notes, replies:drafts.replies, patch:drafts.patch}));
+        {notes:drafts.notes, replies:drafts.replies, patch:drafts.patch}));
     }catch(e){}
   }
   /* an edit, a resolve or a delete on a thread that is already in the document
@@ -874,7 +865,7 @@ JS = r"""
     if(t && t.status !== 'deleted') anchor(t);
   }
   function uid(){ return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-  function label(k){ return LABELS[k] || TAGS[k] || k; }
+  function label(k){ return TAGS[k] || k; }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function toast(m){ toastEl.textContent = m; toastEl.style.display = 'block';
@@ -1446,11 +1437,8 @@ JS = r"""
 
   /* ---------- panel collapse (desktop) + view state ---------- */
   var UIKEY = KEY + ':ui', ui = {};
-  try{
-    var rawUi = localStorage.getItem(UIKEY);
-    if(rawUi === 'hidden') ui = {c:1};               /* pre-tabs format */
-    else if(rawUi) ui = JSON.parse(rawUi) || {};
-  }catch(e){ ui = {}; }
+  try{ ui = JSON.parse(localStorage.getItem(UIKEY) || '{}') || {}; }
+  catch(e){ ui = {}; }
   function saveUi(){ try{ localStorage.setItem(UIKEY, JSON.stringify(ui)); }catch(e){} }
   function wide(){ return window.matchMedia('(min-width:901px)').matches; }
   function collapsed(){ return document.body.classList.contains('rd-nopanel'); }
@@ -1707,7 +1695,6 @@ def render_html(src_text, out_name, old_notes):
             json.dumps({"slug": slug, "file": out_name, "title": title}, ensure_ascii=False),
         )
         .replace("__TAGS__", json.dumps(TAGS, ensure_ascii=False))
-        .replace("__LABELS__", json.dumps(dict(OLD_TAGS, **TAGS), ensure_ascii=False))
         .replace("__NO_BODY_TAGS__", json.dumps(sorted(NO_BODY_TAGS)))
         .replace("__CLOSING_TAGS__", json.dumps(sorted(CLOSING_TAGS)))
     )
