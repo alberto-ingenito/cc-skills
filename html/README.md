@@ -5,9 +5,10 @@ a Word-style threaded comment panel on the right. You select a sentence and eith
 highlight it or tag a note (question / clarify this / change this / defer to backlog /
 agree); Claude's answers come back stacked underneath your comment in the same thread.
 
-One Python file, stdlib only. No install, no npm, no build step on your side, no server,
-no network. The generated HTML has zero external references — you can email it, AirDrop
-it, or open it from a USB stick and it still works, including dark mode.
+Python 3 stdlib only: no npm, no build step on your side. The generated HTML has zero
+external references — you can email it, AirDrop it, or open it from a USB stick and it
+still works, including dark mode. An optional local server makes it live while Claude
+Code runs (see "Live and offline").
 
 ## Using it
 
@@ -16,8 +17,9 @@ R=~/.claude/skills/html/reviewdoc.py
 
 python3 $R new myplan                       # starter myplan.src.html
 python3 $R build myplan.src.html --open     # check it, write myplan.html, open it
-# ... annotate, then press "Export notes for Claude" and save next to the doc ...
-python3 $R import myplan.html myplan-notes.json
+python3 $R wait myplan.html                 # Claude runs this in the background
+# ... annotate, then Send to Claude (live) or Export and save next to the doc ...
+python3 $R import myplan.html myplan-notes.json   # offline only: live notes are already in
 python3 $R list myplan.html                 # the threads needing an answer
 python3 $R list myplan.html --deferred
 python3 $R list myplan.html --highlights
@@ -27,7 +29,8 @@ python3 $R md myplan.html                   # myplan.md (+ myplan-fig-N.svg)
 ```
 
 Normally you don't type any of this — you ask Claude for a reviewable document and
-it drives the CLI. Your only jobs are annotating and pressing Export.
+it drives the CLI. Your only jobs are annotating and pressing Send to Claude (live) or
+Export (offline).
 
 ## Why the source is HTML
 
@@ -40,37 +43,99 @@ build with its line number rather than vanishing from the page.
 Markdown is now an output. `md` writes GitLab-flavoured markdown from a built document,
 and the page's **↓ Markdown** button hands the reader the same text.
 
-## The two manual steps, and why
+## Live and offline
 
-**1. You press "Export notes for Claude".** A page opened over `file://` cannot write
-to your disk by itself. The button opens a native save dialog in Chrome (point it at
-the document's folder; Chrome remembers it), and falls back to a plain download to
-`~/Downloads` in browsers without one. Claude reads the file from wherever you saved
-it — on macOS it often cannot read `~/Downloads`, so the doc's own folder is better.
+The same file works two ways.
 
-**2. You reload after Claude replies.** Claude edits the HTML file on disk; an
-already-open tab has no way to know. `fetch()` back to a local process is blocked
-by CORS on `file://` origins, and long-polling a file is not possible either.
+**Live.** A small server (`live.py`, stdlib only) serves the page from
+`http://127.0.0.1:<port>/d/<doc id>/`. Every note goes into the HTML file on disk as
+you write it, so there is no Export. Claude's replies appear in the open page within
+seconds, so there is no reload. **Send to Claude** wakes the Claude session that is
+waiting on the page. The panel's status line says which mode you are in.
 
-Both steps exist because there is **deliberately no local server**. A server would
-remove the clicks but add a process to start, a port to trust, and something to
-leave running. For a document you read once and mark up, two clicks is the cheaper
-trade.
+**Offline.** The file opened on its own, from disk or an email. Notes stay in the
+browser until you press **Export notes for Claude**, which saves a JSON file; Claude
+reads it from beside the document or from `~/Downloads`. If a live server is running,
+the offline copy notices and offers **Open it live**, carrying your unsent notes
+across in the link.
 
-<!-- Possible future fast lane: drive the open tab over the Chromium MCP
-     (evaluate_javascript) to pull notes and inject replies without the export
-     or the reload. Not implemented, not approved. -->
+A live page whose server stops (Claude Code quit) says so and keeps working: notes
+wait in the browser and are written to the file as soon as the server is back. The
+port is stable, so the browser finds those notes again.
+
+### When the server runs
+
+One server per user, shared by every Claude Code session on the machine. It starts
+when a session first opens or waits on a review, and stops 90 seconds after the last
+such session has exited. Sessions record their Claude process under
+`~/.cache/reviewdoc/sessions/`, and the server checks those processes are alive.
+
+Claude never talks to the server over the network. They meet in files: the document
+itself, under a per-document lock, plus a few small records in `~/.cache/reviewdoc`.
+That is deliberate. Apple Claude Code's sandbox lets nothing Claude runs open or reach
+a local port. Files also cope with any number of parallel sessions.
+
+The same sandbox means Claude cannot start the server, so on Apple Claude Code there
+is a one-time step, run in a normal Terminal:
+
+```bash
+python3 ~/.claude/skills/html/reviewdoc.py install     # uninstall to undo
+```
+
+It installs a LaunchAgent that watches `~/.cache/reviewdoc/sessions/`. When a session
+writes there, launchd starts the server outside the sandbox, and launchd never runs
+two copies. Without a sandbox (plain Claude Code), the CLI starts the server itself
+and no install is needed. `reviewdoc.py status` shows what is running.
+
+### Security
+
+- It listens on `127.0.0.1` only, on the first free port from 47700 (`REVIEWDOC_PORT`
+  moves the range).
+- It serves only documents a `build` has registered, by their random id.
+- Requests whose `Host` is not `127.0.0.1`/`localhost` are refused (DNS rebinding).
+- Every API call needs a per-user token, kept `0600` in the state directory. Only the
+  pages the server serves carry it, and it rides in a custom header, which another
+  site's script cannot send without a CORS preflight the server never grants.
+- Any other local user who knows a document's id could open that page. On a
+  single-user Mac this does not matter.
+
+## Sharing it with others
+
+Today the skill is a folder: copy `~/.claude/skills/html/` to someone else's
+`~/.claude/skills/`. It needs only the system Python 3.
+
+The better route is a **Claude Code plugin** in a marketplace, so people install and
+update it with `/plugin`:
+
+```
+html-review/
+  .claude-plugin/plugin.json      name, version, description
+  skills/html/                    this folder, unchanged
+```
+
+At Apple, the `ai-for-devs-community` marketplace
+(`github.pie.apple.com/AI-for-Devs-Community/claude-code-marketplace`) is the natural
+home. A marketplace of your own on GitLab works the same way. Two things to know:
+
+- **Apple Claude Code users still run `install` once.** A plugin cannot start a server
+  from inside the sandbox either. The LaunchAgent records the script's path, and plugin
+  updates may move it; `status` and `open` notice and ask for a reinstall.
+- **The clean long-term fix is on the ACC side.** ACC already runs its own server per
+  session, outside the sandbox. A supported way for a plugin to declare a local service
+  for ACC to host would remove the install step for everyone. That is worth raising
+  with the ACC team.
 
 ## Where things go
 
 | | |
 |---|---|
-| The skill | `~/.claude/skills/html/` — `reviewdoc.py`, `SKILL.md`, `example.src.html` |
+| The skill | `~/.claude/skills/html/` — `reviewdoc.py`, `live.py`, `SKILL.md`, `example.src.html` |
 | Your source | `<name>.src.html` in the repo you are working in, or its `docs/` |
 | The document | next to the source, `<name>.html`, unless `-o` says otherwise |
 | Exported notes | wherever you save them; the doc's own folder is best |
 | Markdown | `<name>.md` and `<name>-fig-N.svg` next to the document |
-| Unexported drafts | browser `localStorage`, key `reviewdoc:<doc id>` |
+| Unexported drafts | browser `localStorage`, key `reviewdoc:<doc id>` (live: only while the server is down) |
+| Live server state | `~/.cache/reviewdoc/` (`REVIEWDOC_STATE` moves it) |
 
 Notes are stored **inside the HTML** in a `<script id="rd-notes">` JSON block, which
 is the single source of truth. `localStorage` is only a scratch buffer for notes you

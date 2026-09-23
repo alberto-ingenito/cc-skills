@@ -5,11 +5,21 @@ description: Generate a self-contained, annotatable HTML review document with a 
 
 # html review documents
 
-One script: `reviewdoc.py` (Python 3 stdlib only, no install). The source is an
-HTML fragment, `<name>.src.html`, in a small fixed vocabulary; the output is
+`reviewdoc.py` (Python 3 stdlib only, no install) builds and edits the
+document; `live.py` beside it is the optional real-time server. The source is
+an HTML fragment, `<name>.src.html`, in a small fixed vocabulary; the output is
 `<name>.html`, one file that works over `file://` with no network. Notes live
 inside the output in a `<script id="rd-notes">` JSON block, so rebuilding never
 loses them and you can read and answer them from the CLI.
+
+The document works two ways, and you drive both with the same commands:
+
+- **Live**, when the server can run: the page is served from `127.0.0.1`,
+  every note is written into `<name>.html` as the reader types, your replies
+  appear in the open page within seconds, and **Send to Claude** wakes you.
+- **Offline**, always: the file opened on its own. Notes wait in the browser
+  until the reader exports them, exactly as before. A live page whose server
+  goes away drops to offline by itself and catches up when it is back.
 
 Invoke as `python3 ~/.claude/skills/html/reviewdoc.py`. Put the source and the
 output **in the current session's working directory** (the repo you were
@@ -24,28 +34,46 @@ point it at the doc's own folder and you read it straight from there.
 
 ```
 reviewdoc.py new <name> --title "T"          # optional scaffold: <name>.src.html
-reviewdoc.py build <name>.src.html --open    # write <name>.html, open it, then STOP and wait
-   ... user selects text, adds notes, presses "Export notes for Claude" ...
-   ... a native save dialog opens — user saves <slug>-notes.json into the doc's folder ...
-   ... user says "done" / "notes exported" ...
-reviewdoc.py import <name>.html <doc-folder>/<slug>-notes.json
+reviewdoc.py build <name>.src.html --open    # prints "live: <url>" or "offline: ..."
+reviewdoc.py wait <name>.html                # as a BACKGROUND task, then STOP and wait
+   ... the reader annotates, then presses Send to Claude (live) or saves an Export ...
+   ... `wait` exits, and that wakes you. Its last line says which: ...
+   "sent: ..."          the notes are already in <name>.html: go straight to list
+   "exported: <path>"   reviewdoc.py import <name>.html <path>   first
 reviewdoc.py list <name>.html                # note threads: ids, tags, quotes, reply counts
 reviewdoc.py list <name>.html --json         # exact bodies, read this before answering
 reviewdoc.py list <name>.html --deferred     # threads that each want a backlog issue
 reviewdoc.py list <name>.html --highlights   # passages they marked without asking anything
 reviewdoc.py reply <name>.html <id> "answer" # threads stay open; only the reader closes them
-reviewdoc.py build <name>.src.html           # re-render; notes + replies survive
-   ... tell the user to reload; answers appear under their comments ...
+reviewdoc.py build <name>.src.html           # only if you changed the prose; notes survive
+reviewdoc.py wait <name>.html                # background again, for the next round
 ```
+
+Live, replies reach the open page on their own; a rebuild shows the reader a
+**Reload** banner. Offline, tell them to reload. Either way, say in chat what
+you answered and what you changed.
 
 Rules for the loop:
 
-- After `build --open`, **wait**. Do not start editing project files while the
+- After `build --open`, start `wait` with the Bash tool's `run_in_background:
+  true` and **stop**. Never run it in the foreground: it blocks until the reader
+  acts, which can take hours. Do not start editing project files while the
   user is still annotating.
-- When the user says they are done: `import`, then `list --json` and actually
-  read every body, then `reply` to each thread, then `build` again, then tell
-  them to reload. Only after that should you touch project files — their notes
-  may change the plan.
+- `wait` ends when the reader presses Send to Claude or saves an Export beside
+  the document or in `~/Downloads`. If it ends any other way (a timeout you
+  gave it, a restart), start it again rather than assuming anything.
+- The user may also just say "done" or "notes exported" in chat, with or
+  without a `wait` running. Then `import` whatever they exported (look beside
+  the document, then `~/Downloads`), or, live, go straight to `list`.
+- When the notes are in: `list --json` and actually read every body, then
+  `reply` to each thread, then `build` if the prose changed, then start `wait`
+  again. Only after that should you touch project files — their notes may
+  change the plan.
+- If `open` or `build --open` prints that live review is off because of the
+  sandbox, tell the user once that it takes one command in a normal Terminal:
+  `python3 ~/.claude/skills/html/reviewdoc.py install`. Do not try it
+  yourself: Claude Code's sandbox refuses it by design, and offline mode
+  works fine meanwhile.
 - Reply in the document, not only in chat. The panel is where they are reading.
 - **Never resolve a thread.** Closing a comment is the reader's judgement, not
   yours — they have a "Mark resolved" button in the panel and it arrives on the
@@ -128,6 +156,11 @@ the answer belonged in the document.
 | `new <name> [--title T]` | writes `<name>.src.html` starter; refuses to overwrite |
 | `build <name>.src.html [-o out.html] [--open]` | checks the source, writes `<name>.html`; preserves notes and the doc id in an existing output. Writes nothing if the check fails |
 | `md <doc.html> [-o out.md] [--force]` | the built document as markdown, best effort — see "Markdown out" |
+| `open <doc.html>` | opens the live page when the server can run, the file otherwise; records this session |
+| `wait <doc.html> [--timeout S]` | run in the background; exits when the reader sends or exports. Records this session, which keeps the server alive |
+| `status` | the server, the sessions keeping it alive, registered documents, whether the LaunchAgent is installed |
+| `install` / `uninstall` | macOS LaunchAgent that starts the server for sandboxed Claude Code. The **user** runs it, once, in a normal Terminal |
+| `serve [--forever]` / `stop` | run the server in the foreground (debugging, or outside Claude Code); stop it |
 | `import <doc.html> <notes.json>` | merges by id; re-running is a no-op. The reader's `kind`, `tag`, `body`, `context` and `status` overwrite what is in the doc, and `status: deleted` removes the thread. Refuses notes exported from another document |
 | `list <doc.html> [--open-only] [--json]` | note threads only; `!` marks unanchored; deferred and highlight counts printed at the end |
 | `list <doc.html> --deferred [--json]` | only `defer` threads — the backlog queue |

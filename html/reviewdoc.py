@@ -11,6 +11,9 @@ Python 3 stdlib only. See SKILL.md for the operational loop.
 """
 
 import argparse
+import contextlib
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -51,6 +54,7 @@ SEC_RE = re.compile(
 MD_RE = re.compile(r'<script id="rd-md" type="application/json">(.*?)</script>', re.S)
 # identifies one document across rebuilds; the browser keys its drafts on it
 DOCID_RE = re.compile(r'<meta name="reviewdoc-id" content="([\w-]+)">')
+DOC_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 
 
 def die(msg) -> NoReturn:
@@ -1066,6 +1070,17 @@ CSS = r"""
     background:var(--good);color:#fff;border:none;width:100%}
   .rd-lite{font:600 13px/1 inherit;padding:11px;border-radius:10px;cursor:pointer;
     background:var(--card2);color:var(--ink);border:1px solid var(--line);width:100%}
+  .rd-live{font-size:12px;line-height:1.45;color:var(--dim);padding:0 15px 10px}
+  .rd-live .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
+    vertical-align:1px;background:var(--dim)}
+  .rd-live.ok .dot,.rd-live.saving .dot{background:var(--good)}
+  .rd-live.down{color:var(--warn)} .rd-live.down .dot{background:var(--warn)}
+  #rd-reload{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:95;display:flex;
+    gap:12px;align-items:center;background:var(--card);border:1px solid var(--accent);
+    border-radius:11px;padding:10px 12px 10px 16px;font:600 14px/1.3 inherit;
+    box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  #rd-reload button{font:650 13px/1 inherit;background:var(--accent);color:#fff;border:none;
+    border-radius:8px;padding:8px 13px;cursor:pointer}
   #rd-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:90;
     background:var(--good);color:#fff;padding:12px 20px;border-radius:10px;font:650 14px/1 inherit;
     display:none;box-shadow:0 6px 22px rgba(0,0,0,.35);text-align:center;max-width:88vw}
@@ -1097,7 +1112,7 @@ CSS = r"""
     .rd-hide{display:none}
   }
   @media print{
-    #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,#rd-help,.rd-tools{display:none!important}
+    #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,#rd-help,#rd-reload,.rd-tools{display:none!important}
     body{padding-right:0}
     mark.rd-hl{background:none;border-bottom:1px solid #999}
   }
@@ -1125,27 +1140,34 @@ JS = r"""
     if(raw && raw.notes) drafts = {notes:raw.notes||[], replies:raw.replies||[], patch:raw.patch||{}};
   }catch(e){}
 
+  pruneDrafts();
+  if(window.RD_LIVE) takeHandoff();
+  saveDrafts(true);
+
   /* once a draft shows up in the embedded block it must never resurrect */
-  var byId = {};
-  embedded.forEach(function(n){ byId[n.id] = n; });
-  drafts.notes = drafts.notes.filter(function(n){ return !byId[n.id]; });
-  drafts.replies = drafts.replies.filter(function(r){
-    var host = byId[r.noteId];
-    if(!host) return true;
-    return !(host.replies||[]).some(function(x){
-      return x.ts === r.ts && x.body === r.body && x.author === r.author;
+  function pruneDrafts(){
+    var byId = {}, mine = {};
+    embedded.forEach(function(n){ byId[n.id] = n; });
+    drafts.notes = drafts.notes.filter(function(n){ return !byId[n.id]; });
+    drafts.notes.forEach(function(n){ mine[n.id] = 1; });
+    drafts.replies = drafts.replies.filter(function(r){
+      var host = byId[r.noteId];
+      if(!host) return !!mine[r.noteId];
+      return !(host.replies||[]).some(function(x){
+        return x.ts === r.ts && x.body === r.body && x.author === r.author;
+      });
     });
-  });
-  /* same for an edit / resolve the embedded block has already caught up with */
-  Object.keys(drafts.patch).forEach(function(id){
-    var host = byId[id], p = drafts.patch[id];
-    if(!host) return;
-    var live = Object.keys(p).some(function(k){
-      return (host[k] || (k === 'status' ? 'open' : '')) !== p[k];
+    /* same for an edit / resolve the embedded block has already caught up with,
+       and for a patch whose thread is gone altogether (a delete that landed) */
+    Object.keys(drafts.patch).forEach(function(id){
+      var host = byId[id], p = drafts.patch[id];
+      if(!host){ if(!mine[id]) delete drafts.patch[id]; return; }
+      var pending = Object.keys(p).some(function(k){
+        return (host[k] || (k === 'status' ? 'open' : '')) !== p[k];
+      });
+      if(!pending) delete drafts.patch[id];
     });
-    if(!live) delete drafts.patch[id];
-  });
-  saveDrafts();
+  }
 
   var wrap = document.querySelector('.wrap'),
       bar = document.getElementById('rd-bar'),
@@ -1162,13 +1184,14 @@ JS = r"""
 
   var pending = null, editing = null, pendTag = 'question', tab = 'notes', openOnly = false;
 
-  function saveDrafts(){
+  function saveDrafts(quiet){
     try{
       if(!drafts.notes.length && !drafts.replies.length && !Object.keys(drafts.patch).length)
         localStorage.removeItem(KEY);
       else localStorage.setItem(KEY, JSON.stringify(
         {notes:drafts.notes, replies:drafts.replies, patch:drafts.patch}));
     }catch(e){}
+    if(!quiet) scheduleSync();
   }
   /* an edit, a resolve or a delete on a thread that is already in the document
      is held here as an override until the user exports and Claude imports it */
@@ -1930,11 +1953,195 @@ JS = r"""
     else fallback();
   });
 
+  /* ---------- live mode: the page as served by `reviewdoc.py serve` ----------
+     The server injects RD_LIVE into the page it serves. Every change goes into
+     the file on disk within a second, Claude's replies arrive without a
+     reload, and Send to Claude wakes whichever session is waiting on this
+     page. When the server goes away the page carries on: drafts stay in this
+     browser (the origin is a stable localhost port) and go up as soon as it
+     answers again. Opened as a plain file, the page looks for a server and
+     offers the live copy, carrying any unsent drafts across in the URL. */
+  var LIVE = window.RD_LIVE || null, liveUp = false, waiting = 0,
+      REV = LIVE ? LIVE.rev : null, CONTENT = LIVE ? LIVE.content : null,
+      syncTimer = null, inflight = null, again = false,
+      statusEl = panel.querySelector('[data-live]'),
+      sendBtn = panel.querySelector('[data-send-claude]'),
+      exportBtn = panel.querySelector('[data-export]');
+
+  function hasDrafts(){
+    return !!(drafts.notes.length || drafts.replies.length || Object.keys(drafts.patch).length);
+  }
+  function api(method, path, body){
+    return fetch(LIVE.api + path, {method:method, cache:'no-store',
+      headers:{'X-Reviewdoc-Token':LIVE.token, 'Content-Type':'application/json'},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); });
+  }
+  function scheduleSync(){
+    if(!LIVE) return;
+    clearTimeout(syncTimer); syncTimer = setTimeout(sync, 400);
+  }
+  /* resolves true once everything local is in the file */
+  function sync(){
+    if(!LIVE) return Promise.resolve(false);
+    if(inflight){ again = true; return inflight; }
+    if(!hasDrafts()) return Promise.resolve(liveUp);
+    setStatus('saving');
+    inflight = api('POST', '/notes', {doc:DOC.id, notes:payload()}).then(function(st){
+      inflight = null; applyState(st);
+      if(again){ again = false; return sync(); }
+      return true;
+    }, function(){ inflight = null; liveDown(); return false; });
+    return inflight;
+  }
+  function poll(){
+    api('GET', '/state').then(function(st){
+      applyState(st);
+      if(hasDrafts()) scheduleSync();
+    }, liveDown).then(function(){ setTimeout(poll, liveUp ? 2000 : 5000); });
+  }
+  function liveDown(){ liveUp = false; setStatus('down'); }
+  /* typing a reply in the panel: a re-render now would throw the text away */
+  function busy(){
+    var a = document.activeElement;
+    return !!(a && a.tagName === 'TEXTAREA' && a.closest && a.closest('#rd-panel') && a.value);
+  }
+  function claudeCount(){
+    var k = 0;
+    embedded.forEach(function(n){
+      (n.replies || []).forEach(function(r){ if(r.author === 'claude') k++; });
+    });
+    return k;
+  }
+  function applyState(st){
+    liveUp = true;
+    waiting = st.waiting || 0;
+    if(st.content && CONTENT && st.content !== CONTENT) showReload();
+    if(st.rev !== REV && !busy()){       /* busy: REV stays stale, next poll retries */
+      var before = claudeCount();
+      REV = st.rev;
+      adopt(st.notes || []);
+      if(claudeCount() > before) toast('Claude replied');
+    }
+    setStatus(inflight ? 'saving' : 'ok');
+  }
+  /* the file's notes are the truth; redraw marks and panel against them */
+  function adopt(notes){
+    embedded = notes;
+    pruneDrafts(); saveDrafts(true);
+    [].forEach.call(document.querySelectorAll('mark.rd-hl'), function(m){
+      unmark(m.dataset.noteId);
+    });
+    threads().forEach(function(t){ if(t.status !== 'deleted') anchor(t); });
+    render();
+  }
+  function setStatus(kind){
+    if(!statusEl) return;
+    var on = '<span class="dot"></span>', t;
+    if(kind === 'offline') t = on + 'Offline copy. Notes stay in this browser until you export them.';
+    else if(kind === 'down') t = on + '<b>Claude Code is not running.</b> Keep going: your notes ' +
+      'stay in this browser and are saved to the file as soon as it is back. Or export them.';
+    else if(kind === 'saving') t = on + 'Live · saving…';
+    else t = on + 'Live · saved to the file' + (waiting ? ' · <b>Claude is waiting</b>' : '');
+    statusEl.innerHTML = t;
+    statusEl.className = 'rd-live ' + kind;
+  }
+  function showReload(){
+    if(document.getElementById('rd-reload')) return;
+    var b = document.createElement('div');
+    b.id = 'rd-reload';
+    b.innerHTML = '<span>Claude rebuilt this page.</span><button type="button">Reload</button>';
+    b.querySelector('button').addEventListener('click', function(){
+      sync().then(function(){ location.reload(); });
+    });
+    document.body.appendChild(b);
+  }
+  if(sendBtn) sendBtn.addEventListener('click', function(){
+    sync().then(function(ok){
+      if(!ok){ toast('Claude Code is not running. Your notes are safe in this browser'); return; }
+      return api('POST', '/send', {doc:DOC.id}).then(function(r){
+        waiting = r.waiting || 0; setStatus('ok');
+        toast(r.waiting ? 'Sent. Claude is reading your notes'
+                        : 'Saved. No Claude session is waiting on this page: tell Claude "notes sent"');
+      });
+    }).catch(function(){ liveDown(); toast('Could not reach the server. Your notes are kept in this browser'); });
+  });
+
+  /* unsent drafts ride from the file:// copy to the live one in the URL
+     fragment: a navigation, so no cross-origin request is involved */
+  function b64(s){
+    return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function unb64(s){
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while(s.length % 4) s += '=';
+    return decodeURIComponent(escape(atob(s)));
+  }
+  function takeHandoff(){
+    var m = /^#rd-drafts=([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if(!m) return;
+    try{
+      var d = JSON.parse(unb64(m[1]));
+      (d.notes || []).forEach(function(n){
+        if(!drafts.notes.some(function(x){ return x.id === n.id; })) drafts.notes.push(n);
+      });
+      (d.replies || []).forEach(function(r){
+        if(!drafts.replies.some(function(x){ return x.noteId === r.noteId && x.ts === r.ts; }))
+          drafts.replies.push(r);
+      });
+      Object.keys(d.patch || {}).forEach(function(id){
+        var p = drafts.patch[id] || (drafts.patch[id] = {});
+        for(var k in d.patch[id]) p[k] = d.patch[id][k];
+      });
+    }catch(e){}
+    history.replaceState(null, '', location.pathname + location.search);
+    pruneDrafts();
+  }
+  /* an <img> probe: a plain GET the server answers only for a document it
+     has registered, and one a file:// page is allowed to make */
+  function probe(){
+    var ports = DOC.ports || [], i = 0;
+    (function next(){
+      if(i >= ports.length){ setTimeout(probe, 20000); return; }
+      var p = ports[i++], img = new Image(), settled = false,
+          timer = setTimeout(function(){ done(false); }, 1200);
+      function done(ok){
+        if(settled) return;
+        settled = true; clearTimeout(timer);
+        if(ok) offerLive(p); else next();
+      }
+      img.onload = function(){ done(true); };
+      img.onerror = function(){ done(false); };
+      img.src = 'http://127.0.0.1:' + p + '/probe/' + DOC.id + '.gif?' + Date.now();
+    })();
+  }
+  function offerLive(p){
+    var url = 'http://127.0.0.1:' + p + '/d/' + DOC.id + '/';
+    statusEl.innerHTML = '<span class="dot"></span>A live session is running for this page. ' +
+      '<a href="' + url + '" data-golive>Open it live</a>' +
+      (hasDrafts() ? ', your unsent notes come along.' : '.');
+    statusEl.className = 'rd-live ok';
+    statusEl.querySelector('[data-golive]').addEventListener('click', function(e){
+      e.preventDefault();
+      location.href = url + (hasDrafts() ? '#rd-drafts=' + b64(JSON.stringify(drafts)) : '');
+    });
+  }
+
   /* one pass over the merged view, so a locally-deleted mark never comes back
      and highlights get the marker-pen class rather than the note one */
   threads().forEach(function(t){ if(t.status !== 'deleted') anchor(t); });
   syncTabs();
   render();
+  if(LIVE){
+    sendBtn.hidden = false;
+    exportBtn.className = 'rd-lite';
+    exportBtn.innerHTML = 'Export notes as JSON';
+    setStatus('ok');
+    poll();
+  } else {
+    setStatus('offline');
+    if(location.protocol === 'file:' && (DOC.ports || []).length) probe();
+  }
 })();
 """
 
@@ -1955,9 +2162,11 @@ PANEL = """
     <button type="button" data-tab="notes">Notes <span class="k">0</span></button>
     <button type="button" data-tab="hl">Highlights <span class="k">0</span></button>
   </div>
+  <div class="rd-live" data-live></div>
   <label class="rd-only"><input type="checkbox" data-openonly> Show open only</label>
   <div class="rd-list"></div>
   <div class="rd-foot">
+    <button class="rd-big" type="button" data-send-claude hidden>&#10148; Send to Claude</button>
     <button class="rd-big" type="button" data-export>&#10003; Export notes for Claude</button>
     <button class="rd-lite" type="button" data-copy>Copy notes as markdown</button>
     <button class="rd-lite" type="button" data-general>+ Note not tied to any text</button>
@@ -1990,9 +2199,13 @@ HELP = """
     <p>The review panel keeps notes and highlights in separate tabs, newest first. You can edit or
     delete your own, and mark a thread resolved &mdash; closing a thread is yours to decide, never
     Claude's.</p>
-    <p>Everything stays in this browser until you press <b>&#10003; Export notes for Claude</b>,
-    which saves a JSON file. Tell Claude when you're done and it will read your notes, reply in the
-    panel, and rebuild the page.</p>
+    <p><b>Live</b> (the panel says so): every note is saved to the file as you write it, Claude's
+    replies appear without a reload, and <b>&#10148; Send to Claude</b> tells the waiting session
+    you are done. If Claude Code stops, keep going: notes wait in this browser and are saved once it
+    is back.</p>
+    <p><b>Offline copy</b> (the file opened on its own): everything stays in this browser until you
+    press <b>&#10003; Export notes for Claude</b>, which saves a JSON file. Tell Claude when you're
+    done and it will read your notes, reply in the panel, and rebuild the page.</p>
     <p class="small">&#8677; in the panel header hides the panel and centres the text.
     <b>&#8595; Markdown</b> at the top of the page saves the document itself as a
     markdown file. <b>&#10530; Full screen</b> hides the browser chrome.</p>
@@ -2028,8 +2241,7 @@ def render_html(src_text, src_path, out_name, old_html=None):
     stem = os.path.splitext(out_name)[0]
     meta, title, sections = parse_source(src_text, src_path, stem)
     slug = slugify(meta.get("slug") or stem)
-    m = DOCID_RE.search(old_html or "")
-    doc_id = m.group(1) if m else uuid.uuid4().hex[:16]
+    docid = doc_id(old_html) or uuid.uuid4().hex[:16]
 
     # the toolbar sits inside .wrap but outside every section, so its button
     # labels never land in the text a note is anchored against
@@ -2045,7 +2257,8 @@ def render_html(src_text, src_path, out_name, old_html=None):
     stats = reanchor(notes, [(s[0], s[1], section_text(s[2])) for s in sections])
 
     js = fill(JS, {
-        "DOC": js_json({"id": doc_id, "slug": slug, "file": out_name, "title": title}),
+        "DOC": js_json({"id": docid, "slug": slug, "file": out_name, "title": title,
+                        "ports": live_ports()}),
         "TAGS": js_json(TAGS),
         "LABELS": js_json(dict(BAR_TAGS, **TAGS)),
         "NO_BODY_TAGS": js_json(sorted(NO_BODY_TAGS)),
@@ -2078,7 +2291,7 @@ __NOTES__
 </html>
 """
     return fill(html, {
-        "ID": doc_id,
+        "ID": docid,
         "TITLE": esc(title),
         "CSS": CSS,
         "BODY": body_html,
@@ -2087,6 +2300,121 @@ __NOTES__
         "MD": md,
         "JS": js,
     }), stats
+
+
+# --------------------------------------------------------------------------
+# shared state: where the CLI and the live server (live.py) meet
+# --------------------------------------------------------------------------
+
+# The live server listens on the first free port of this range. A stable port
+# matters: it is the page's origin, so drafts kept in the browser while the
+# server is down are found again when it comes back.
+DEFAULT_PORT = 47700
+PORT_SPAN = 10
+
+
+def state_dir(*parts):
+    """~/.cache/reviewdoc/<parts>, created on first use. One per user, shared
+    by every Claude Code session on the machine."""
+    root = os.environ.get("REVIEWDOC_STATE") or os.path.join(
+        os.path.expanduser("~"), ".cache", "reviewdoc")
+    path = os.path.join(root, *parts)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def live_ports():
+    try:
+        base = int(os.environ.get("REVIEWDOC_PORT") or DEFAULT_PORT)
+    except ValueError:
+        base = DEFAULT_PORT
+    return list(range(base, base + PORT_SPAN))
+
+
+@contextlib.contextmanager
+def doc_lock(path):
+    """Serialise read-modify-write of one document between the CLI (replies,
+    imports, rebuilds) and the live server (the reader's autosave), which may
+    run in any number of processes at once."""
+    key = hashlib.sha1(os.path.abspath(path).encode("utf-8")).hexdigest()[:20]
+    try:
+        f = open(os.path.join(state_dir("locks"), key + ".lock"), "w")
+    except OSError:
+        yield                   # no state dir: unlocked, as it always was
+        return
+    with f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def doc_id(html):
+    m = DOCID_RE.search(html or "")
+    return m.group(1) if m else None
+
+
+def register_doc(path, docid, title):
+    """Tell the live server this document exists, so it will serve it. Only
+    registered documents are ever served."""
+    if not docid:
+        return
+    try:
+        rec = {"path": os.path.abspath(path), "title": title, "ts": now_iso()}
+        write(os.path.join(state_dir("docs"), docid + ".json"), json.dumps(rec))
+    except OSError:
+        pass
+
+
+def merge_notes(notes, incoming):
+    """Fold the reader's notes into the document's. The reader owns every
+    thread's question and status; replies from either side are unioned, so
+    nothing Claude wrote in the meantime is lost. -> counts."""
+    by_id = dict((n["id"], n) for n in notes if "id" in n)
+    c = {"added": 0, "replies": 0, "edited": 0, "removed": 0}
+    for raw in incoming:
+        if not isinstance(raw, dict) or "id" not in raw:
+            continue
+        n = normalise(dict(raw))
+        cur = by_id.get(n["id"])
+        # the reader deleted it in the panel: take it out and never re-add it
+        if n["status"] == "deleted":
+            if cur is not None:
+                notes.remove(cur)
+                del by_id[n["id"]]
+                c["removed"] += 1
+            continue
+        if cur is None:
+            notes.append(n)
+            by_id[n["id"]] = n
+            c["added"] += 1
+            continue
+        have = set((r.get("author"), r.get("ts"), r.get("body")) for r in cur["replies"])
+        for r in n["replies"]:
+            key = (r.get("author"), r.get("ts"), r.get("body"))
+            if key not in have:
+                cur["replies"].append(r)
+                have.add(key)
+                c["replies"] += 1
+        for k in ("kind", "tag", "body", "status", "context"):
+            if k in raw and n[k] != cur.get(k):
+                cur[k] = n[k]
+                c["edited"] += 1
+    return c
+
+
+def unwrap_export(incoming, html, source):
+    """An export is {doc, file, notes} (or a bare list from older pages).
+    -> the notes list, after refusing one meant for another document."""
+    if isinstance(incoming, dict):
+        mine = doc_id(html)
+        if mine and incoming.get("doc") and incoming["doc"] != mine:
+            raise ValueError("%s was exported from another document (%s)"
+                             % (source, incoming.get("file") or incoming["doc"]))
+        incoming = incoming.get("notes")
+    if not isinstance(incoming, list):
+        raise ValueError("%s must contain a JSON array of notes" % source)
+    if not all(isinstance(x, dict) and "id" in x for x in incoming):
+        raise ValueError("%s: every note must be an object with an \"id\"" % source)
+    return incoming
 
 
 # --------------------------------------------------------------------------
@@ -2138,10 +2466,16 @@ def read(path):
 
 
 def write(path, text):
+    """Write via a temp file and rename, so the live server never serves a
+    half-written document."""
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
+        os.replace(tmp, path)
     except IOError as e:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
         die("cannot write %s (%s)" % (path, e.strerror))
 
 
@@ -2170,9 +2504,12 @@ def cmd_build(a):
         die("name the source <name>%s (it builds <name>.html), or pass -o" % SRC_EXT)
     if os.path.abspath(out) == os.path.abspath(a.src):
         die("the output would overwrite the source")
-    old = read(out) if os.path.exists(out) else None
-    html, stats = render_html(read(a.src), a.src, os.path.basename(out), old)
-    write(out, html)
+    src = read(a.src)
+    with doc_lock(out):
+        old = read(out) if os.path.exists(out) else None
+        html, stats = render_html(src, a.src, os.path.basename(out), old)
+        write(out, html)
+    register_doc(out, doc_id(html), plain(DOC_TITLE_RE.search(html).group(1)))
     msg = "built %s (%d bytes)" % (out, len(html.encode("utf-8")))
     if old:
         msg += " — notes: %d kept, %d re-anchored, %d unanchored" % (
@@ -2182,11 +2519,28 @@ def cmd_build(a):
         )
     print(msg)
     if a.open:
-        opener = "open" if sys.platform == "darwin" else "xdg-open"
-        try:
-            subprocess.Popen([opener, out], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except OSError:
-            sys.stderr.write("reviewdoc: could not run %s\n" % opener)
+        open_doc(out, html)
+
+
+def open_doc(path, html):
+    """Open the live page when the server is up, the file itself otherwise."""
+    target = os.path.abspath(path)
+    try:
+        import live
+        live.ensure_live()
+        url = live.url_for(doc_id(html))
+    except ImportError:
+        url = None
+    if url:
+        target = url
+        print("live: %s" % url)
+    else:
+        print("offline: the live server is not running; opened the file itself")
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        sys.stderr.write("reviewdoc: could not run %s\n" % opener)
 
 
 def cmd_md(a):
@@ -2208,65 +2562,27 @@ def cmd_md(a):
 
 
 def cmd_import(a):
-    html = read(a.doc)
-    notes = read_notes(html, a.doc)
     try:
-        incoming = json.loads(read(a.notes))
+        raw = json.loads(read(a.notes))
     except ValueError as e:
         die("%s is not valid JSON (%s)" % (a.notes, e))
-    if isinstance(incoming, dict):
-        mine = DOCID_RE.search(html)
-        if mine and incoming.get("doc") and incoming["doc"] != mine.group(1):
-            die("%s was exported from another document (%s), not %s"
-                % (a.notes, incoming.get("file") or incoming["doc"], a.doc))
-        if isinstance(incoming.get("notes"), list):
-            incoming = incoming["notes"]
-    if not isinstance(incoming, list):
-        die("%s must contain a JSON array of notes" % a.notes)
-    if not all(isinstance(x, dict) and "id" in x for x in incoming):
-        die("%s: every note must be an object with an \"id\"" % a.notes)
-
-    by_id = dict((n["id"], n) for n in notes if "id" in n)
-    added = merged = edited = dropped = 0
-    for raw in incoming:
-        if not isinstance(raw, dict) or "id" not in raw:
-            continue
-        n = normalise(dict(raw))
-        cur = by_id.get(n["id"])
-        # the reader deleted it in the panel: take it out and never re-add it
-        if n["status"] == "deleted":
-            if cur is not None:
-                notes.remove(cur)
-                del by_id[n["id"]]
-                dropped += 1
-            continue
-        if cur is None:
-            notes.append(n)
-            by_id[n["id"]] = n
-            added += 1
-            continue
-        have = set((r.get("author"), r.get("ts"), r.get("body")) for r in cur["replies"])
-        for r in n["replies"]:
-            key = (r.get("author"), r.get("ts"), r.get("body"))
-            if key not in have:
-                cur["replies"].append(r)
-                have.add(key)
-                merged += 1
-        # the reader owns the question and its status: whatever came back wins
-        for k in ("kind", "tag", "body", "status", "context"):
-            if k in raw and n[k] != cur.get(k):
-                cur[k] = n[k]
-                edited += 1
-
-    reanchor(notes, doc_sections(html))
-    with open(a.doc, "w", encoding="utf-8") as f:
-        f.write(write_notes(html, notes))
+    with doc_lock(a.doc):
+        html = read(a.doc)
+        notes = read_notes(html, a.doc)
+        try:
+            incoming = unwrap_export(raw, html, a.notes)
+        except ValueError as e:
+            die(str(e))
+        c = merge_notes(notes, incoming)
+        reanchor(notes, doc_sections(html))
+        write(a.doc, write_notes(html, notes))
     loose = sum(1 for n in notes if not n.get("anchored"))
     hl = sum(1 for n in notes if n.get("kind") == "highlight")
     print(
         "imported into %s: %d new, %d new repl(ies), %d edit(s), %d removed — "
         "%d thread(s) + %d highlight(s), %d unanchored"
-        % (a.doc, added, merged, edited, dropped, len(notes) - hl, hl, loose)
+        % (a.doc, c["added"], c["replies"], c["edited"], c["removed"],
+           len(notes) - hl, hl, loose)
     )
 
 
@@ -2330,8 +2646,7 @@ def cmd_list(a):
 
 
 def _save_notes(path, html, notes):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(write_notes(html, notes))
+    write(path, write_notes(html, notes))
 
 
 READER_CLOSES = (
@@ -2344,6 +2659,11 @@ READER_CLOSES = (
 def cmd_reply(a):
     if a.resolve:
         die(READER_CLOSES)
+    with doc_lock(a.doc):
+        _reply(a)
+
+
+def _reply(a):
     html = read(a.doc)
     notes = read_notes(html, a.doc)
     if a.all_open:
@@ -2410,6 +2730,42 @@ def main(argv=None):
     q.add_argument("--force", action="store_true",
                    help="replace an existing .md that `md` did not write")
     q.set_defaults(fn=cmd_md)
+
+    def live_cmd(name):
+        def run(a):
+            import live
+            return getattr(live, "cmd_" + name)(a)
+        return run
+
+    q = sub.add_parser("open", help="open a document: the live page if the server runs, else the file")
+    q.add_argument("doc")
+    q.set_defaults(fn=live_cmd("open"))
+
+    q = sub.add_parser("wait", help="block until the reader sends or exports notes (run in background)")
+    q.add_argument("doc")
+    q.add_argument("--timeout", type=int, default=0, help="seconds; 0 waits as long as the session lives")
+    q.set_defaults(fn=live_cmd("wait"))
+
+    q = sub.add_parser("serve", help="run the live server in the foreground")
+    q.add_argument("--port", type=int)
+    q.add_argument("--forever", action="store_true",
+                   help="do not stop when the last Claude Code session ends")
+    q.add_argument("--spawned", action="store_true", help=argparse.SUPPRESS)
+    q.add_argument("--launchd", action="store_true", help=argparse.SUPPRESS)
+    q.set_defaults(fn=live_cmd("serve"))
+
+    q = sub.add_parser("install", help="macOS: LaunchAgent that starts the live server for "
+                                       "sandboxed Claude Code (run once, in Terminal)")
+    q.set_defaults(fn=live_cmd("install"))
+
+    q = sub.add_parser("uninstall", help="remove the LaunchAgent and stop the server")
+    q.set_defaults(fn=live_cmd("uninstall"))
+
+    q = sub.add_parser("status", help="show the live server, sessions and documents")
+    q.set_defaults(fn=live_cmd("status"))
+
+    q = sub.add_parser("stop", help="stop the live server")
+    q.set_defaults(fn=live_cmd("stop"))
 
     q = sub.add_parser("import", help="merge exported notes JSON into a built doc")
     q.add_argument("doc")
