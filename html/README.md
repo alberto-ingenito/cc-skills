@@ -87,6 +87,25 @@ writes there, launchd starts the server outside the sandbox, and launchd never r
 two copies. Without a sandbox (plain Claude Code), the CLI starts the server itself
 and no install is needed. `reviewdoc.py status` shows what is running.
 
+### On a remote machine (VS Code Remote-SSH)
+
+Claude runs on the remote, so the server does too, with its own state in the remote's
+`~/.cache/reviewdoc`. VS Code forwards the port to your machine. Its remote terminals
+set `$BROWSER` to a helper that opens a URL on your machine, and `build --open` uses it,
+so the live page opens in your local browser.
+
+- The forwarded port may differ, for example `localhost:47701` when your own machine's
+  server already holds 47700. That is fine: the server checks the host name, not the
+  port.
+- Inside VS Code, **Simple Browser: Show** with the same `localhost` address shows the
+  live page in an editor tab.
+- If nothing opens, forward port 47700 from the **Ports** panel and open it from there.
+- A remote Mac running Apple Claude Code needs `install` once, from a plain terminal on
+  that Mac. A Linux remote needs nothing, as long as Claude Code's sandbox lets the
+  server listen; if it does not, there is no LaunchAgent equivalent yet.
+- The offline copy is a file on the remote, so reviewing it offline means copying it to
+  your machine first.
+
 ### Security
 
 - It listens on `127.0.0.1` only, on the first free port from 47700 (`REVIEWDOC_PORT`
