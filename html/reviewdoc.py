@@ -1725,6 +1725,10 @@ JS = r"""
     if(!body && NO_BODY_TAGS.indexOf(pendTag) < 0){ edText.focus(); return; }
     if(editing){
       var id = editing.id, was = editing.kind, p = {tag:pendTag, body:body};
+      /* re-tagging to agree closes the thread, exactly as filing it that way
+         does; re-tagging an agree to anything else opens it again */
+      if(CLOSING_TAGS.indexOf(pendTag) >= 0) p.status = 'resolved';
+      else if(CLOSING_TAGS.indexOf(editing.tag) >= 0) p.status = 'open';
       if(was === 'highlight') p.kind = 'note';
       closeEd();
       patch(id, p);
