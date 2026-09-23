@@ -338,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if method == "GET" and path == "/api/ping":
                 return self._send(200, {"app": "reviewdoc", "version": VERSION,
-                                        "pid": os.getpid()})
+                                        "pid": os.getpid(), "uid": os.getuid()})
             m = re.fullmatch(r"/probe/([\w-]+)\.gif", path)
             if method == "GET" and m:
                 if not registered(m.group(1)):
@@ -390,6 +390,43 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def port_owner(port):
+    """Who is listening on 127.0.0.1:port -> "free", "ours" or "other".
+
+    A connection is the only reliable test on macOS. http.server sets
+    SO_REUSEADDR, which a restart needs: it lets the server reclaim a port
+    whose old connections are still in TIME_WAIT. But on BSD it also lets a
+    bind to 127.0.0.1 succeed on top of another app's 0.0.0.0 listener, and
+    the more specific address wins, so we would quietly take that app's local
+    traffic. Closed-connection leftovers refuse a connect; a listener does not."""
+    try:
+        c = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+    except ConnectionRefusedError:
+        return "free"
+    except OSError:
+        return "other"          # no answer in time, or stranger: leave it alone
+    data = b""
+    try:
+        c.settimeout(0.5)
+        c.sendall(b"GET /api/ping HTTP/1.0\r\nHost: 127.0.0.1:%d\r\n\r\n" % port)
+        while len(data) < 4096:
+            chunk = c.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+    except OSError:
+        return "other"
+    finally:
+        c.close()
+    try:
+        ping = json.loads(data.split(b"\r\n\r\n", 1)[-1])
+    except ValueError:
+        return "other"
+    # another user's server on a shared Mac is not ours to lean on
+    ok = isinstance(ping, dict) and ping.get("app") == "reviewdoc" and ping.get("uid") == os.getuid()
+    return "ours" if ok else "other"
+
+
 def serve(port=None, forever=False, spawned=False, launchd=False):
     if launchd and not live_sessions():
         # launchd fires on any change to sessions/, including our own clean-up
@@ -405,6 +442,13 @@ def serve(port=None, forever=False, spawned=False, launchd=False):
     ports = [port] if port else rd.live_ports()
     httpd = None
     for p in ports:
+        owner = port_owner(p)
+        if owner == "ours":
+            print("a reviewdoc server already answers on %d; not starting another" % p, flush=True)
+            return 0
+        if owner == "other":
+            print("port %d is in use by another program; trying the next" % p, flush=True)
+            continue
         try:
             httpd = Server(("127.0.0.1", p), Handler)
             break
