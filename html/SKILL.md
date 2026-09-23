@@ -1,17 +1,18 @@
 ---
-name: present-dense-plan
+name: html
 description: Generate a self-contained, annotatable HTML review document with a Word-style threaded comment panel, then read the user's comments and reply to them in place. Use when you are about to present a dense or complicated plan, diagnosis, design doc, architecture proposal, security review, migration strategy or post-mortem — anything with enough moving parts, branching decisions or cross-cutting mechanism that a wall of terminal markdown would be hard to review, and especially when you need decisions back on specific points rather than a yes/no. Also use whenever the user asks to "review", "annotate", "comment on", or "mark up" something, and to continue an existing review round trip after they say they have exported their notes. Skip it for short answers, single-decision questions, and anything they can act on by reading one screen.
 ---
 
-# present-dense-plan
+# html review documents
 
-One script: `reviewdoc.py` (Python 3 stdlib only, no install). Source is a
-markdown-ish `.md`; output is one HTML file that works over `file://` with no
-network. Notes live inside the HTML in a `<script id="rd-notes">` JSON block, so
-rebuilding never loses them and you can read and answer them from the CLI.
+One script: `reviewdoc.py` (Python 3 stdlib only, no install). The source is an
+HTML fragment, `<name>.src.html`, in a small fixed vocabulary; the output is
+`<name>.html`, one file that works over `file://` with no network. Notes live
+inside the output in a `<script id="rd-notes">` JSON block, so rebuilding never
+loses them and you can read and answer them from the CLI.
 
-Invoke as `python3 ~/.claude/skills/html/reviewdoc.py`. Put the `.md` and
-`.html` **in the current session's working directory** (the repo you were
+Invoke as `python3 ~/.claude/skills/html/reviewdoc.py`. Put the source and the
+output **in the current session's working directory** (the repo you were
 invoked in), or a `docs/` subfolder of it — never `/tmp`, and avoid
 `~/.claude/plans` or `~/Downloads`. The reason is the export round-trip: on
 macOS you frequently cannot read `~/Downloads` back, so the notes file must
@@ -22,18 +23,18 @@ point it at the doc's own folder and you read it straight from there.
 ## The loop
 
 ```
-reviewdoc.py new <name> --title "T"          # optional scaffold
-reviewdoc.py build <src.md> --open           # write it, open it, then STOP and wait
+reviewdoc.py new <name> --title "T"          # optional scaffold: <name>.src.html
+reviewdoc.py build <name>.src.html --open    # write <name>.html, open it, then STOP and wait
    ... user selects text, adds notes, presses "Export notes for Claude" ...
    ... a native save dialog opens — user saves <slug>-notes.json into the doc's folder ...
    ... user says "done" / "notes exported" ...
-reviewdoc.py import <doc.html> <doc-folder>/<slug>-notes.json
-reviewdoc.py list <doc.html>                 # note threads: ids, tags, quotes, reply counts
-reviewdoc.py list <doc.html> --json          # exact bodies, read this before answering
-reviewdoc.py list <doc.html> --deferred      # threads that each want a backlog issue
-reviewdoc.py list <doc.html> --highlights    # passages they marked without asking anything
-reviewdoc.py reply <doc.html> <id> "answer"  # threads stay open; only the reader closes them
-reviewdoc.py build <src.md>                  # re-render; notes + replies survive
+reviewdoc.py import <name>.html <doc-folder>/<slug>-notes.json
+reviewdoc.py list <name>.html                # note threads: ids, tags, quotes, reply counts
+reviewdoc.py list <name>.html --json         # exact bodies, read this before answering
+reviewdoc.py list <name>.html --deferred     # threads that each want a backlog issue
+reviewdoc.py list <name>.html --highlights   # passages they marked without asking anything
+reviewdoc.py reply <name>.html <id> "answer" # threads stay open; only the reader closes them
+reviewdoc.py build <name>.src.html           # re-render; notes + replies survive
    ... tell the user to reload; answers appear under their comments ...
 ```
 
@@ -58,6 +59,8 @@ Rules for the loop:
   panel. `import` takes their `tag`, `body` and `status` as authoritative, so a
   question may come back reworded — answer the version you just imported, and do
   not argue with an edit.
+- The export carries the document's id. `import` refuses a notes file exported
+  from a different document, so two docs that share a name cannot cross over.
 - Rebuild is safe: each note is re-found by its quoted text (moving between
   sections is fine). A note whose quote no longer exists is kept and shown under
   **Unanchored**, never dropped. `build` prints `N kept, N re-anchored, N unanchored`.
@@ -98,14 +101,15 @@ Decide per thread:
 
 - **Panel only** — the default for anything local: "what is this?", "what does
   that flag do?", a definition, a number, a yes/no, a `clarify` on one phrase.
-  Reply in the thread and leave the source `.md` alone. Do not bolt a new
-  paragraph onto the document because one reader asked one question; the answer
-  is already attached to the exact sentence that prompted it.
+  Reply in the thread and leave the source alone. Do not bolt a new paragraph
+  onto the document because one reader asked one question; the answer is
+  already attached to the exact sentence that prompted it.
 - **Corpus only, with a pointer in the panel** — when the answer changes the
   plan, corrects something wrong, or is something the *next* reader of the
-  document also needs. Edit the `.md`, rebuild, and make the reply a one-liner
-  that points at the change: `Wrong as written — rewrote §4, it now says the
-  patch runs before startup.` Do not paste the new prose into the reply as well.
+  document also needs. Edit the `.src.html`, rebuild, and make the reply a
+  one-liner that points at the change: `Wrong as written — rewrote §4, it now
+  says the patch runs before startup.` Do not paste the new prose into the reply
+  as well.
 - Reply bodies linkify `§N` (section number), `[label](#sec-id)` and bare URLs.
   The first two scroll the document to that section and flash it — use `§N`, it
   is checked against the rendered section numbers at click time.
@@ -121,9 +125,10 @@ the answer belonged in the document.
 
 | Command | Notes |
 |---|---|
-| `new <name> [--title T]` | writes `<name>.md` starter; refuses to overwrite |
-| `build <src.md> [-o out.html] [--open]` | default output is `<src>.html`; preserves notes in an existing output |
-| `import <doc.html> <notes.json>` | merges by id; re-running is a no-op. The reader's `kind`, `tag`, `body`, `context` and `status` overwrite what is in the doc, and `status: deleted` removes the thread |
+| `new <name> [--title T]` | writes `<name>.src.html` starter; refuses to overwrite |
+| `build <name>.src.html [-o out.html] [--open]` | checks the source, writes `<name>.html`; preserves notes and the doc id in an existing output. Writes nothing if the check fails |
+| `md <doc.html> [-o out.md] [--force]` | the built document as markdown, best effort — see "Markdown out" |
+| `import <doc.html> <notes.json>` | merges by id; re-running is a no-op. The reader's `kind`, `tag`, `body`, `context` and `status` overwrite what is in the doc, and `status: deleted` removes the thread. Refuses notes exported from another document |
 | `list <doc.html> [--open-only] [--json]` | note threads only; `!` marks unanchored; deferred and highlight counts printed at the end |
 | `list <doc.html> --deferred [--json]` | only `defer` threads — the backlog queue |
 | `list <doc.html> --highlights [--json]` | the reader's highlights instead |
@@ -137,78 +142,90 @@ error on bad input.
 
 ## Source format
 
-Front matter (all optional): `title`, `subtitle`, `meta` (small mono byline),
-`slug` (controls the export filename, defaults to the output stem),
-`hint: false` (drops the "ⓘ How to use this page" button and its dialog).
+The source is a fragment of plain HTML — no `<html>`, `<head>` or `<body>` —
+using the tags and classes below and nothing else. `build` checks it strictly
+and, if anything is off, writes nothing and lists every problem with its line
+number. Fix them and build again.
 
-```
----
-title: Why the build breaks on his Mac
-subtitle: One sentence of context, written for someone with no background.
-meta: fiorano-workspace · branch main_B0 · 2026-08-20
----
-```
+**Escaping is two characters.** Write a literal `<` as `&lt;` and `&` as
+`&amp;`, inside `<pre>` and `<code>` too: `<code>vector&lt;int&gt;</code>`.
+Nothing else needs escaping — `*ptr`, `**kwargs`, `a|b`, backticks and
+underscores are all literal. A `<` you forget to escape (`x<y`, `vector<int>`)
+fails the check as an unknown tag instead of silently vanishing from the page.
 
-Markdown supported: `##` (auto-numbered sections), `###`, paragraphs,
-`**bold**`, `*italic*`, `` `code` ``, fenced blocks, `-`/`*`/`1.` lists with
-2-space nesting, pipe tables (`|---|` separator row makes a header), `---`
-rules, `[text](url)`. Everything is HTML-escaped except `:::html`. `##` inside a
-fence or a `:::` block is not treated as a heading.
+The top of the file is the header:
 
-### Directives
-
-Each opens with `:::name` and closes with a bare `:::`. Bodies are parsed as
-markdown (except `:::html`).
-
-```
-:::lede
-The whole answer in plain language, before any detail.
-:::
-
-:::flag good verified | Not a guess this time
-Body. Kind is good|warn|bad|info; the words after it become the uppercase pill;
-anything after | is the bold title. All three parts are optional.
-:::
-
-:::card What each knob does
-Boxed aside. The argument becomes an h3.
-:::
-
-:::analogy
-Think of it as a soundproof booth with one phone line to the mailroom.
-:::
-
-:::steps
-1. First thing.
-2. Second thing.
-:::
-
-:::tick
-- What holds.
-:::
-
-:::cross
-- What does not.
-:::
-
-:::html
-<svg viewBox="0 0 700 200" role="img" aria-label="...">...</svg>
-:::
+```html
+<meta name="slug" content="lab-build">     <!-- optional: names the exported files -->
+<meta name="hint" content="false">         <!-- optional: drops the how-to button -->
+<h1>Why the build breaks on the lab Mac</h1>
+<p class="sub">One sentence of context, written for this reader.</p>
+<p class="meta">fiorano-workspace · branch main_B0 · 2026-08-20</p>
 ```
 
-`:::html` is raw passthrough — not escaped, not markdown-processed. It is the
-only way to get a diagram in. An unknown directive name warns on stderr and
-renders as a card.
+All of it is optional. `<h1>` has to be the first element if it is there;
+without it the title is the file name.
 
-Inside `:::html`, use the CSS variables so diagrams follow dark/light mode:
+**Tags.** `<h2>` starts an auto-numbered section and only goes at the top level.
+Then `h3`, `h4`, `p`, `ul`/`ol`/`li` (nest freely), `table`/`thead`/`tbody`/
+`tr`/`th`/`td` (a first row of `<th>` is the header), `pre` holding one `code`,
+`blockquote`, `hr`, and inline `b`, `strong`, `i`, `em`, `code`, `a href`, `br`,
+`sub`, `sup`, `kbd`. `<code class="language-python">` tags a code block's
+language for the markdown export. No `style`, `id`, `span`, `img` or `script`,
+and no class outside this table:
+
+| Markup | Renders as | Use it for |
+|---|---|---|
+| `<p class="lede">` | grey intro paragraph | the whole answer, before any detail |
+| `<div class="flag good\|warn\|bad\|info" data-pill="words">` | coloured side-bar | verdicts and warnings |
+| `<div class="card">` | boxed panel | a self-contained aside |
+| `<div class="analogy">` | italic block | a concrete comparison |
+| `<ol class="steps">` | numbered circles | anything the user follows by hand |
+| `<ul class="tick">` / `<ul class="cross">` | ✓ / ✗ lists | what holds and what does not |
+| `<div class="grid g2">` / `g3` | side by side on wide screens | two or three cards to compare |
+| `<p class="small">` | dim small print | footnotes |
+| `<svg>` | inline diagram, untouched | anything with arrows |
+
+A flag or a card takes an optional `<h3>` as its first child, which becomes its
+bold title. On a flag, `data-pill` becomes the uppercase pill before the title;
+both parts are optional:
+
+```html
+<div class="flag bad" data-pill="the crux">
+  <h3>The patch runs after startup</h3>
+  <p>Body, as ordinary blocks.</p>
+</div>
+```
+
+Pills and step numbers are drawn by CSS, so they are not text and cannot be
+selected or annotated. Neither can anything inside `<svg>`: put what you want
+commented on in real prose.
+
+Inside `<svg>`, use the CSS variables so diagrams follow dark/light mode:
 `var(--ink)`, `var(--dim)`, `var(--line)`, `var(--card)`, `var(--card2)`,
 `var(--accent)`, `var(--good)`, `var(--warn)`, `var(--bad)`. Never hardcode
-`#000`/`#fff` for text. Text nodes inside `<svg>` are skipped by the anchoring
-walker, so diagram labels cannot be annotated — put anything you want commented
-on in real prose.
+`#000`/`#fff` for text. Give the `<svg>` an `aria-label`; the markdown export
+uses it as the figure's caption.
 
-See `example.md` in this folder for a complete working source exercising every
-directive.
+See `example.src.html` in this folder for a complete working source that uses
+every class.
+
+## Markdown out
+
+The source stays the only thing you edit; markdown is an output, for pasting
+into an MR, a wiki or a chat, or committing next to the code.
+
+- `reviewdoc.py md <name>.html` writes `<name>.md` in GitLab-flavoured
+  markdown. Flags become alerts (`bad` → `[!CAUTION]`, `warn` → `[!WARNING]`,
+  `good` → `[!TIP]`, `info` → `[!NOTE]`), cards and analogies become
+  blockquotes, steps an ordered list. Each diagram is written as
+  `<name>-fig-N.svg` beside it, with the light palette built in so its colours
+  survive outside the page. It refuses to overwrite a `.md` it did not write
+  itself (`--force` overrides), so it cannot clobber a hand-written file.
+- The **↓ Markdown** button at the top of the page gives the reader the same
+  markdown, generated by `build`, with a caption line where each diagram was.
+- Best effort: `colspan` flattens, the pill turns into italic text before the
+  title, and the notes are not included (`list --json` has those).
 
 ## Writing it
 
@@ -222,7 +239,7 @@ for their background and calibrate against it:
   no definition of their own vocabulary. Explaining the basics of their own field
   reads as condescension and wastes the page.
 - Topics they have flagged as weak, or that sit outside their stated background, get
-  built up from fundamentals with `:::analogy` doing real work.
+  built up from fundamentals with an `analogy` block doing real work.
 - A document that spans both varies register section by section. It is normal for one
   page to assume fluency in the reader's core domain while carefully unpacking an
   adjacent one.
@@ -232,25 +249,25 @@ most common reason a review document annoys the reader.
 
 The rest of the guidance holds at any level:
 
-- **Answer first.** Open with `:::lede` giving the whole conclusion in four
-  sentences. No suspense, no chronology of your investigation.
-- **One idea per `##`.** Short sections, scannable headings that state a claim
+- **Answer first.** Open with `<p class="lede">` giving the whole conclusion in
+  four sentences. No suspense, no chronology of your investigation.
+- **One idea per `<h2>`.** Short sections, scannable headings that state a claim
   ("The error message was pointing at the wrong country"), not a label
   ("Analysis").
 - **Analogies are load-bearing**, not decoration. Any mechanism that is abstract
-  *to this reader* gets a concrete everyday comparison in `:::analogy`. Something
-  they work with daily does not.
+  *to this reader* gets a concrete everyday comparison in an `analogy` block.
+  Something they work with daily does not.
 - **Diagram instead of listing facts.** When you are about to write a paragraph
-  describing how three things connect, draw it with inline SVG in `:::html`.
-- **Colour-code severity** with `:::flag`: `bad` for the crux/blocker, `warn`
-  for a trade-off or caveat, `good` for something verified or safe, `info` for
+  describing how three things connect, draw it with an inline `<svg>`.
+- **Colour-code severity** with flags: `bad` for the crux/blocker, `warn` for a
+  trade-off or caveat, `good` for something verified or safe, `info` for
   neutral framing. Put the pill to work (`verified`, `the crux`, `assumption`).
 - **Say what you are unsure about**, in its own flag or section. It is the part
   the user can most usefully correct, and the panel exists for exactly that.
 - **End with what you need from them** — a small table of decisions with your
   recommendation on each, so annotating has an obvious target.
-- Tables for comparisons, `:::tick`/`:::cross` for holds/does-not, `:::steps`
-  for anything the user will follow by hand.
+- Tables for comparisons, `tick`/`cross` lists for holds/does-not, `steps` for
+  anything the user will follow by hand.
 
 Selections work best inside a single paragraph or list item; a selection
 spanning two blocks cannot be highlighted and will land in Unanchored. Do not

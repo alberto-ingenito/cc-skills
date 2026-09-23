@@ -1,0 +1,154 @@
+<h1>How the review loop works</h1>
+<p class="sub">A worked example that also exercises everything the source format supports. Copy it, delete the prose, keep the shapes.</p>
+<p class="meta">html skill example · stdlib only · 2026-09-23</p>
+
+<p class="lede">Everything you need is in this one file. It is written the way a review
+document should be written: the answer first, in plain language, before any of the
+detail.</p>
+
+<h2>The shape of the thing</h2>
+
+<p>A review document is a single HTML file. There is no server, no build step on the
+reader's side and no network. You open it by double-clicking it, you select sentences
+you want to argue with, and your notes travel back to Claude as one small JSON file.</p>
+
+<div class="analogy">
+  <p>Think of it as a printed draft with a red pen and a pile of sticky notes. The
+  difference is that the sticky notes know exactly which sentence they were stuck to,
+  so they still line up after the draft is retyped.</p>
+</div>
+
+<div class="flag good" data-pill="verified">
+  <h3>Notes are never lost on rebuild</h3>
+  <p>When the document is regenerated, every existing note is searched for by its
+  quoted text. If the sentence moved, the note follows it. If the sentence is gone
+  entirely, the note is kept and labelled <b>Unanchored</b> rather than dropped.</p>
+</div>
+
+<div class="flag warn" data-pill="one manual step">
+  <h3>You have to click Export yourself</h3>
+  <p>A page opened over <code>file://</code> cannot write to your disk on its own, and
+  it cannot call out to a local process. So the loop has one human step: press
+  <b>Export notes for Claude</b>, which saves a JSON file.</p>
+</div>
+
+<h2>The loop, end to end</h2>
+
+<ol class="steps">
+  <li>Claude writes <code>plan.src.html</code> and runs <code>reviewdoc.py build</code>.</li>
+  <li>You open <code>plan.html</code>, select text, and add notes. They are held in this browser.</li>
+  <li>You press <b>Export notes for Claude</b> and save the JSON next to the document.</li>
+  <li>Claude runs <code>import</code>, then <code>list</code>, then <code>reply</code> on each thread.</li>
+  <li>Claude runs <code>build</code> again. You reload and read the answers under your comments.</li>
+</ol>
+
+<p>The panel on the right is the whole interface. Each of your notes becomes a thread,
+and Claude's answers stack underneath it in order, the way a comment thread works in a
+word processor.</p>
+
+<svg viewBox="0 0 700 200" role="img" aria-label="Diagram of the review loop">
+  <defs>
+    <marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="var(--dim)"/>
+    </marker>
+  </defs>
+  <rect x="10" y="60" width="130" height="56" rx="11" fill="var(--card)" stroke="var(--line)"/>
+  <text x="75" y="84" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="650">build</text>
+  <text x="75" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">Claude writes it</text>
+
+  <rect x="185" y="60" width="150" height="56" rx="11" fill="var(--card)" stroke="var(--accent)"/>
+  <text x="260" y="84" text-anchor="middle" fill="var(--accent)" font-size="13" font-weight="650">you annotate</text>
+  <text x="260" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">in the browser</text>
+
+  <rect x="380" y="60" width="140" height="56" rx="11" fill="var(--card)" stroke="var(--warn)"/>
+  <text x="450" y="84" text-anchor="middle" fill="var(--warn)" font-size="13" font-weight="650">export JSON</text>
+  <text x="450" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">the one manual step</text>
+
+  <rect x="565" y="60" width="125" height="56" rx="11" fill="var(--card)" stroke="var(--good)"/>
+  <text x="627" y="84" text-anchor="middle" fill="var(--good)" font-size="13" font-weight="650">reply</text>
+  <text x="627" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">Claude answers</text>
+
+  <line x1="140" y1="88" x2="181" y2="88" stroke="var(--dim)" stroke-width="1.6" marker-end="url(#a1)"/>
+  <line x1="335" y1="88" x2="376" y2="88" stroke="var(--dim)" stroke-width="1.6" marker-end="url(#a1)"/>
+  <line x1="520" y1="88" x2="561" y2="88" stroke="var(--dim)" stroke-width="1.6" marker-end="url(#a1)"/>
+  <path d="M627,116 L627,165 L75,165 L75,120" fill="none" stroke="var(--dim)"
+        stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a1)"/>
+  <text x="351" y="182" text-anchor="middle" fill="var(--dim)" font-size="11">rebuild: your notes and the answers both survive</text>
+</svg>
+
+<h2>What the source looks like</h2>
+
+<p>The source is plain HTML with a handful of classes. Only <code>&lt;</code> and
+<code>&amp;</code> need escaping, and <code>build</code> refuses anything outside the
+vocabulary with a line number, so a slip is never silent.</p>
+
+<pre><code class="language-html">&lt;h2&gt;A section&lt;/h2&gt;
+&lt;p&gt;Ordinary &lt;b&gt;bold&lt;/b&gt;, &lt;i&gt;italic&lt;/i&gt; and &lt;code&gt;vector&amp;lt;int&amp;gt;&lt;/code&gt;.&lt;/p&gt;
+&lt;div class="flag bad" data-pill="the crux"&gt;
+  &lt;h3&gt;The patch runs after startup&lt;/h3&gt;
+  &lt;p&gt;Body.&lt;/p&gt;
+&lt;/div&gt;</code></pre>
+
+<div class="card">
+  <h3>What each class is for</h3>
+  <p><code>lede</code> for the opening summary, <code>analogy</code> when a concept needs
+  a real-world hook, <code>flag</code> for anything the reader must not miss,
+  <code>steps</code> for an ordered procedure, <code>card</code> to box up a digression
+  like this one, and a bare <code>&lt;svg&gt;</code> for a diagram.</p>
+</div>
+
+<table>
+  <tr><th>Markup</th><th>Renders as</th><th>Use it for</th></tr>
+  <tr><td><code>&lt;p class="lede"&gt;</code></td><td>grey intro paragraph</td><td>the answer, up front</td></tr>
+  <tr><td><code>&lt;div class="analogy"&gt;</code></td><td>italic quote block</td><td>making an abstraction concrete</td></tr>
+  <tr><td><code>&lt;div class="flag good|warn|bad|info"&gt;</code></td><td>coloured side-bar</td><td>verdicts and warnings</td></tr>
+  <tr><td><code>&lt;div class="card"&gt;</code></td><td>boxed panel</td><td>a self-contained aside</td></tr>
+  <tr><td><code>&lt;ol class="steps"&gt;</code></td><td>numbered circles</td><td>a procedure</td></tr>
+  <tr><td><code>&lt;ul class="tick"&gt;</code> / <code>cross</code></td><td>✓ / ✗ lists</td><td>what holds and what does not</td></tr>
+  <tr><td><code>&lt;svg&gt;</code></td><td>inline diagram</td><td>anything with arrows</td></tr>
+</table>
+
+<h3>Things that work well</h3>
+
+<ul class="tick">
+  <li>Short sections with one idea each.</li>
+  <li>A diagram wherever a list of facts would otherwise pile up.</li>
+  <li>Naming your own uncertainty, so the reader knows where to push back.</li>
+</ul>
+
+<h3>Things that do not</h3>
+
+<ul class="cross">
+  <li>Walls of prose with no headings.</li>
+  <li>Jargon that assumes the reader already knows the answer.</li>
+  <li>Burying the recommendation at the bottom.</li>
+</ul>
+
+<h3>Ordinary lists nest</h3>
+
+<ol>
+  <li>A numbered step, with <i>emphasis</i> where it helps.</li>
+  <li>Another one, dereferencing *ptr and matching *.py without any escaping.
+    <ul>
+      <li>A nested detail.</li>
+      <li>And a second nested detail.</li>
+    </ul>
+  </li>
+  <li>Back out to the top level.</li>
+</ol>
+
+<hr>
+
+<h2>What I need from you</h2>
+
+<div class="flag info" data-pill="decisions">
+  <p>Selecting text inside this box works exactly like anywhere else. Try it.</p>
+</div>
+
+<table>
+  <tr><th>Decision</th><th>Recommendation</th></tr>
+  <tr><td>Keep the export step manual</td><td><code>yes</code>: no server means nothing to install or trust</td></tr>
+  <tr><td>Store notes inside the HTML</td><td><code>yes</code>: one file to move around, and rebuilds keep them</td></tr>
+</table>
+
+<p>Mark this page up and export the notes when you are done.</p>

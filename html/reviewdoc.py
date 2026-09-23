@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """reviewdoc — build self-contained, annotatable HTML review documents.
 
-Markdown-ish source in, one HTML file out, with a Word-style threaded comment
-panel. Notes live inside the HTML (a JSON block), so a rebuild never loses them
-and Claude can read and reply to them from the command line.
+An HTML fragment in a small fixed vocabulary goes in, checked strictly; one
+self-contained HTML file comes out, with a Word-style threaded comment panel.
+Notes live inside the HTML (a JSON block), so a rebuild never loses them and
+Claude can read and reply to them from the command line. `md` turns a built
+document back into markdown, best effort.
 
 Python 3 stdlib only. See SKILL.md for the operational loop.
 """
@@ -14,8 +16,11 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
+from html import unescape
 from html.parser import HTMLParser
+from typing import NoReturn
 
 # Offered in the note editor's tag picker, in this order.
 TAGS = {
@@ -43,9 +48,12 @@ SEC_RE = re.compile(
     r'<section class="rd-sec" id="([^"]+)" data-title="([^"]*)">(.*?)<!--/rd-sec--></section>',
     re.S,
 )
+MD_RE = re.compile(r'<script id="rd-md" type="application/json">(.*?)</script>', re.S)
+# identifies one document across rebuilds; the browser keys its drafts on it
+DOCID_RE = re.compile(r'<meta name="reviewdoc-id" content="([\w-]+)">')
 
 
-def die(msg):
+def die(msg) -> NoReturn:
     sys.stderr.write("reviewdoc: %s\n" % msg)
     sys.exit(1)
 
@@ -77,314 +85,601 @@ def u16len(s):
 
 
 # --------------------------------------------------------------------------
-# markdown subset -> html
+# source: an HTML fragment in a fixed vocabulary, checked before it is used
 # --------------------------------------------------------------------------
 
-CODE_RE = re.compile(r"`([^`]+)`")
-LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
-BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.S)
-ITAL_RE = re.compile(r"(?<![\*\w])\*([^*\n]+)\*(?!\*)")
+# Every tag the source may use. Anything else fails the build, which is the
+# point: a literal `<` written into prose (`vector<int>`) parses as an unknown
+# tag, so it is reported with its line number instead of vanishing from the page.
+INLINE = {"a", "b", "strong", "i", "em", "code", "br", "sub", "sup", "kbd"}
+BLOCK = {"h1", "h2", "h3", "h4", "p", "ul", "ol", "li", "table", "thead", "tbody",
+         "tr", "th", "td", "pre", "div", "blockquote", "hr", "svg", "meta"}
+VOID = {"br", "hr", "meta"}
+
+# class -> the one tag it may sit on
+CLASSES = {
+    "lede": "p", "sub": "p", "meta": "p", "small": "p",
+    "flag": "div", "card": "div", "analogy": "div", "grid": "div",
+    "tick": "ul", "cross": "ul", "steps": "ol",
+}
+# modifiers that only make sense next to one base class
+MODIFIERS = {"flag": {"good", "warn", "bad", "info"}, "grid": {"g2", "g3"}}
+# attributes other than `class`; everything unlisted is refused, `style` included
+ATTRS = {
+    "a": {"href"}, "th": {"colspan", "rowspan"}, "td": {"colspan", "rowspan"},
+    "div": {"data-pill"}, "meta": {"name", "content"},
+}
+META_NAMES = {"slug", "hint"}
+
+# what may sit directly inside a tag, when that is narrower than "anything"
+CHILDREN = {
+    "ul": {"li"}, "ol": {"li"},
+    "table": {"thead", "tbody", "tr"}, "thead": {"tr"}, "tbody": {"tr"},
+    "tr": {"th", "td"}, "pre": {"code"}, "code": set(),
+}
+ONLY_INLINE = {"p", "h1", "h2", "h3", "h4", "a", "b", "strong", "i", "em",
+               "sub", "sup", "kbd"}
+PARENTS = {"li": {"ul", "ol"}, "tr": {"table", "thead", "tbody"},
+           "th": {"tr"}, "td": {"tr"}, "thead": {"table"}, "tbody": {"table"}}
+TOP_ONLY = {"h1", "h2", "meta"}
+NO_TEXT = {"ul": "li", "ol": "li", "table": "td", "thead": "td", "tbody": "td",
+           "tr": "td"}
+# HTML tags that make a browser abandon an open <svg> mid-diagram
+SVG_BREAKOUT = {"b", "big", "blockquote", "br", "center", "code", "dd", "div", "dl",
+                "dt", "em", "embed", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i",
+                "img", "li", "listing", "menu", "meta", "nobr", "ol", "p", "pre",
+                "ruby", "s", "small", "span", "strike", "strong", "sub", "sup",
+                "table", "tt", "u", "ul", "var"}
 
 
-def inline(text):
-    """Escape, then apply the small inline grammar. Code spans are protected."""
-    spans = []
+class Source(HTMLParser):
+    """Check a source fragment against the vocabulary above and note where
+    each top-level <h2> starts. Collects every error rather than stopping at
+    the first, so one build reports everything that needs fixing."""
 
-    def stash(m):
-        spans.append(esc(m.group(1)))
-        return "\x00%d\x00" % (len(spans) - 1)
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.errors, self.stack, self.svg = [], [], 0
+        self.h2 = []            # (line, col) of each top-level <h2>
+        self.meta = {}
+        self.top = 0            # top-level elements seen so far, <meta> aside
 
-    text = CODE_RE.sub(stash, text)
-    text = esc(text)
-    text = BOLD_RE.sub(lambda m: "<b>%s</b>" % m.group(1), text)
-    text = ITAL_RE.sub(lambda m: "<i>%s</i>" % m.group(1), text)
-    text = LINK_RE.sub(
-        lambda m: '<a href="%s">%s</a>' % (m.group(2), m.group(1)), text
-    )
-    text = re.sub(
-        r"\x00(\d+)\x00", lambda m: "<code>%s</code>" % spans[int(m.group(1))], text
-    )
-    return text
+    def err(self, msg):
+        self.errors.append("line %d: %s" % (self.getpos()[0], msg))
+
+    def handle_starttag(self, tag, attrs):
+        self._open(tag, attrs, False)
+        self._replay()
+
+    def handle_startendtag(self, tag, attrs):
+        self._open(tag, attrs, True)
+        self._replay()
+
+    def _replay(self):
+        """`x<y here.</p>` parses as one bogus tag that swallowed the `</p>`.
+        Replay any closing tags it ate, so one slip is reported once instead of
+        leaving the paragraph open for the rest of the file."""
+        if self.svg:
+            return
+        for name in re.findall(r"</\s*([A-Za-z][\w-]*)", self.get_starttag_text() or ""):
+            self.handle_endtag(name.lower())
+
+    def _open(self, tag, attrs, selfclosed):
+        if self.svg:
+            if tag in SVG_BREAKOUT:
+                self.err("<%s> inside <svg> makes a browser end the diagram early; "
+                         "diagram labels go in <text>" % tag)
+            elif tag == "svg" and not selfclosed:
+                self.svg += 1
+            return
+        parent = self.stack[-1][0] if self.stack else None
+        if tag not in INLINE and tag not in BLOCK:
+            # not pushed: a stray `<int>` must not also report "never closed"
+            self.err("<%s> is not an allowed tag. A literal < in text must be "
+                     "written &lt; (and & as &amp;), e.g. vector&lt;int&gt;" % tag)
+            return
+        self._placement(tag, parent)
+        self._attrs(tag, attrs)
+        if tag == "svg":
+            if not selfclosed:
+                self.svg = 1
+            return
+        if selfclosed and tag not in VOID:
+            self.err("<%s/> does not close itself in HTML; write <%s></%s>" % (tag, tag, tag))
+        elif tag not in VOID:
+            self.stack.append((tag, self.getpos()[0]))
+
+    def _placement(self, tag, parent):
+        if parent is None:
+            if tag == "h1" and self.top:
+                self.err("<h1> must be the first thing in the source")
+            if tag == "h2":
+                self.h2.append(self.getpos())
+            if tag != "meta":
+                self.top += 1
+            if tag in INLINE:
+                self.err("<%s> at the top level; wrap it in <p>" % tag)
+            elif tag in PARENTS:
+                self.err("<%s> must sit inside <%s>" % (tag, "> or <".join(sorted(PARENTS[tag]))))
+            return
+        if tag in TOP_ONLY:
+            self.err("<%s> must be at the top level, not inside <%s>" % (tag, parent))
+        elif parent in CHILDREN and tag not in CHILDREN[parent]:
+            allowed = CHILDREN[parent]
+            self.err("<%s> cannot sit directly inside <%s>%s" % (
+                tag, parent,
+                " (only <%s>)" % "> or <".join(sorted(allowed)) if allowed else
+                "; it holds text only"))
+        elif parent in ONLY_INLINE and tag not in INLINE:
+            self.err("<%s> cannot sit inside <%s>; only inline tags can" % (tag, parent))
+        elif tag in PARENTS and parent not in PARENTS[tag]:
+            self.err("<%s> must sit inside <%s>, not <%s>"
+                     % (tag, "> or <".join(sorted(PARENTS[tag])), parent))
+        elif tag == "a" and any(t == "a" for t, _ in self.stack):
+            self.err("<a> inside <a>")
+
+    def _attrs(self, tag, attrs):
+        if tag == "svg":
+            return              # a diagram is passed through untouched, attributes and all
+        classes = []
+        for k, v in attrs:
+            if k == "class":
+                classes = (v or "").split()
+            elif k == "style":
+                self.err("inline style on <%s>; use the classes in SKILL.md" % tag)
+            elif k not in ATTRS.get(tag, ()):
+                self.err("attribute %s is not allowed on <%s>" % (k, tag))
+        if tag == "meta":
+            d = dict(attrs)
+            if d.get("name") not in META_NAMES or d.get("content") is None:
+                self.err('<meta> takes name="slug" or name="hint" and a content')
+            else:
+                self.meta[d["name"]] = d["content"]
+        if tag == "code":
+            if len(classes) > 1 or (classes and not classes[0].startswith("language-")):
+                self.err('<code> takes only class="language-..."')
+            return
+        base = [c for c in classes if c in CLASSES]
+        mods = [c for c in classes if c not in CLASSES]
+        if len(base) > 1:
+            self.err("<%s> has two kinds at once: %s" % (tag, " ".join(base)))
+        elif base and CLASSES[base[0]] != tag:
+            self.err('class "%s" belongs on <%s>, not <%s>' % (base[0], CLASSES[base[0]], tag))
+        bad = [c for c in mods if not base or c not in MODIFIERS.get(base[0], ())]
+        if bad:
+            self.err('unknown class "%s" on <%s>' % (" ".join(bad), tag))
+        if dict(attrs).get("data-pill") is not None and base != ["flag"]:
+            self.err("data-pill only goes on a flag")
+
+    def handle_endtag(self, tag):
+        if self.svg:
+            if tag == "svg":
+                self.svg -= 1
+            return
+        if tag not in INLINE and tag not in BLOCK:
+            return              # its opening tag has already been reported
+        if tag in VOID:
+            self.err("</%s>: <%s> has no closing tag" % (tag, tag))
+            return
+        if not any(t == tag for t, _ in self.stack):
+            self.err("</%s> has no matching <%s>" % (tag, tag))
+            return
+        if self.stack[-1][0] != tag:
+            t, line = self.stack[-1]
+            self.err("</%s> arrives while <%s> from line %d is still open" % (tag, t, line))
+        # pop back to the match, so one mistake is reported once, not at every tag after it
+        while self.stack.pop()[0] != tag:
+            pass
+
+    def handle_data(self, data):
+        if self.svg or not data.strip():
+            return
+        parent = self.stack[-1][0] if self.stack else None
+        snippet = re.sub(r"\s+", " ", data.strip())[:40]
+        if parent is None:
+            self.err('text outside any element, wrap it in <p>: "%s"' % snippet)
+        elif parent in NO_TEXT:
+            self.err('text directly inside <%s>, put it in <%s>: "%s"'
+                     % (parent, NO_TEXT[parent], snippet))
+
+    def handle_decl(self, decl):
+        self.err("<!%s> does not belong in a source fragment" % decl)
+
+    def unknown_decl(self, data):
+        if not self.svg:            # CDATA is legal inside a diagram
+            self.err("<![%s]> does not belong in a source fragment" % data)
+
+    def handle_pi(self, data):
+        self.err("<?%s> does not belong in a source fragment" % data)
+
+    def close(self):
+        HTMLParser.close(self)
+        for tag, line in self.stack:
+            self.errors.append("line %d: <%s> is never closed" % (line, tag))
+        if self.svg:
+            self.errors.append("end of file: <svg> is never closed")
 
 
-def front_matter(lines):
-    meta = {}
-    if not lines or lines[0].strip() != "---":
-        return meta, lines
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return meta, lines[i + 1 :]
-        m = re.match(r"\s*([A-Za-z_][\w-]*)\s*:\s*(.*)$", lines[i])
-        if m:
-            meta[m.group(1)] = m.group(2).strip().strip("\"'")
-    return meta, lines[1:]
+def plain(html):
+    """Visible text of an inline HTML snippet."""
+    return unescape(re.sub(r"<[^>]*>", "", html)).strip()
 
 
-def is_blank(s):
-    return not s.strip()
+HEAD_RE = re.compile(
+    r"\s*<h1\s*>(.*?)</h1\s*>((?:\s*<p\s+class=[\"']?(?:sub|meta)[\"']?\s*>.*?</p\s*>)*)",
+    re.S,
+)
+H2_RE = re.compile(r"<h2\s*>(.*?)</h2\s*>", re.S)
 
 
-def take_directive(lines, i):
-    """Return (name, args, body_lines, next_index) for a ::: block at i."""
-    m = re.match(r":::(\w+)[ \t]*(.*)$", lines[i].strip())
-    name, args = m.group(1), m.group(2).strip()
-    body, j, depth = [], i + 1, 1
-    while j < len(lines):
-        s = lines[j].strip()
-        if s == ":::":
-            depth -= 1
-            if depth == 0:
-                return name, args, body, j + 1
-        elif re.match(r":::\w+", s):
-            depth += 1
-        body.append(lines[j])
-        j += 1
-    return name, args, body, j  # unterminated: swallow to EOF
+def polish(html):
+    """The few rewrites a built section needs on top of the source."""
+    # a browser drops a newline straight after <pre>; Python's text walk would
+    # not, and the two must agree on every character offset a note uses
+    html = re.sub(r"<pre\s*>\n", "<pre>", html)
+    html = re.sub(r"<table\b", '<div class="scroll"><table', html)
+    return re.sub(r"</table\s*>", "</table></div>", html)
 
 
-def list_items(lines):
-    """Flat-ish list parse. Returns [(depth, text, ordered)] items."""
+def parse_source(text, path, fallback_title):
+    """Check the source, then -> (meta, title, [(id, title, html)]).
+    Slot 0 is always the intro (the header plus anything before the first
+    <h2>), so the page header has somewhere to live and text up there anchors."""
+    chk = Source()
+    chk.feed(text)
+    chk.close()
+    if chk.errors:
+        shown = chk.errors[:25]
+        more = len(chk.errors) - len(shown)
+        die("%s: %d problem(s), nothing written\n  %s%s" % (
+            path, len(chk.errors), "\n  ".join(shown),
+            "\n  ... and %d more" % more if more else ""))
+
+    # HTMLParser counts lines by "\n" alone, so do the same here
+    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    cuts = [starts[line - 1] + col for line, col in chk.h2]
+    chunks = [text[a:b] for a, b in zip([0] + cuts, cuts + [len(text)])]
+    chunks = [re.sub(r"<meta\b[^>]*>", "", re.sub(r"<!--.*?-->", "", c, flags=re.S))
+              for c in chunks]
+
+    intro = chunks[0]
+    m = HEAD_RE.match(intro)
+    if m:
+        title = plain(m.group(1)) or fallback_title
+        head = "<header><h1>%s</h1>%s</header>" % (m.group(1), m.group(2))
+        intro = intro[m.end():]
+    else:
+        title = fallback_title
+        head = "<header><h1>%s</h1></header>" % esc(title)
+    out = [("sec-intro", title, head + polish(intro))]
+
+    seen = {}
+    for num, chunk in enumerate(chunks[1:], 1):
+        h = H2_RE.match(chunk)
+        stitle = plain(h.group(1)) if h else ""
+        body = '<h2><span class="num">%d</span>%s</h2>' % (num, h.group(1)) + chunk[h.end():] \
+            if h else chunk
+        sid = "sec-" + slugify(stitle)
+        seen[sid] = seen.get(sid, 0) + 1
+        if seen[sid] > 1:
+            sid = "%s-%d" % (sid, seen[sid])
+        out.append((sid, stitle, polish(body)))
+    return chk.meta, title, out
+
+
+# --------------------------------------------------------------------------
+# built HTML -> markdown (best effort, over the vocabulary above)
+# --------------------------------------------------------------------------
+
+GEN_MARK = "<!-- generated by reviewdoc.py"
+FIG_RE = re.compile(r"<svg\b.*?</svg\s*>", re.S | re.I)
+MD_BLOCKS = {"section", "header", "h1", "h2", "h3", "h4", "p", "ul", "ol", "li", "pre",
+             "table", "thead", "tbody", "tr", "th", "td", "div", "blockquote", "hr",
+             "rdfig"}
+ALERT = {"bad": "CAUTION", "warn": "WARNING", "good": "TIP", "info": "NOTE"}
+
+
+class Node(object):
+    __slots__ = ("tag", "attrs", "kids")
+
+    def __init__(self, tag, attrs=()):
+        self.tag, self.attrs, self.kids = tag, dict(attrs), []
+
+    def cls(self):
+        return (self.attrs.get("class") or "").split()
+
+
+class Tree(HTMLParser):
+    """Tolerant tree builder: just enough structure to walk."""
+
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.root = Node("#root")
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        n = Node(tag, attrs)
+        self.stack[-1].kids.append(n)
+        if tag not in VOID:
+            self.stack.append(n)
+
+    def handle_startendtag(self, tag, attrs):
+        self.stack[-1].kids.append(Node(tag, attrs))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].tag == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        self.stack[-1].kids.append(data)
+
+
+def text_of(node):
+    return "".join(k if isinstance(k, str) else text_of(k) for k in node.kids)
+
+
+def md_escape(s, table=False):
+    s = re.sub(r"([\\`*\[\]<~])", r"\\\1", s)
+    # an underscore between two letters is never emphasis; anywhere else it can be
+    s = re.sub(r"(?<![A-Za-z0-9])_|_(?![A-Za-z0-9])", r"\\_", s)
+    s = re.sub(r"&(?=#?\w+;)", r"\\&", s)
+    return s.replace("|", "\\|") if table else s
+
+
+def md_lead(s):
+    """Escape whatever would turn the start of a paragraph into markup."""
+    if re.fullmatch(r"[-=*_ ]{3,}", s):
+        return "\\" + s
+    m = re.match(r"(\d+)([.)])(\s|$)", s)
+    if m:
+        return m.group(1) + "\\" + s[len(m.group(1)):]
+    if re.match(r"(#{1,6}(\s|$)|>|[-+=](\s|$))", s):
+        return "\\" + s
+    return s
+
+
+def md_code(s, table=False):
+    s = re.sub(r"\s+", " ", s)
+    runs = [len(r) for r in re.findall(r"`+", s)]
+    fence = "`" * (max(runs) + 1 if runs else 1)
+    if runs or s.startswith(" ") or s.endswith(" "):
+        s = " " + s + " "
+    return fence + (s.replace("|", "\\|") if table else s) + fence
+
+
+def md_emph(s, mark):
+    core = s.strip()
+    if not core:
+        return s
+    return (" " if s[:1].isspace() else "") + mark + core + mark + \
+        (" " if s[-1:].isspace() else "")
+
+
+def md_link(text, href):
+    if not href:
+        return text
+    if re.search(r"[\s()<>]", href):
+        href = "<%s>" % href.replace("<", "%3C").replace(">", "%3E")
+    return "[%s](%s)" % (text.strip() or md_escape(href), href)
+
+
+class MdCtx(object):
+    """Figures seen so far, and whether we are inside a table cell."""
+
+    def __init__(self, stem, files):
+        self.stem, self.files, self.table = stem, files, False
+        self.figs = []
+
+    def stash(self, m):
+        self.figs.append(m.group(0))
+        return '<rdfig n="%d"></rdfig>' % len(self.figs)
+
+    def figure(self, node):
+        n = int(node.attrs.get("n", "0"))
+        svg = self.figs[n - 1] if 0 < n <= len(self.figs) else ""
+        lab = re.search(r"\baria-label=\"([^\"]*)\"", svg[:400])
+        label = unescape(lab.group(1)).strip() if lab else ""
+        if self.files is None:
+            return "*Figure %d%s. The diagram is in the HTML version of this document.*" \
+                % (n, ": " + md_escape(label) if label else "")
+        name = "%s-fig-%d.svg" % (self.stem, n)
+        self.files.append((name, standalone_svg(svg)))
+        return "![%s](%s)" % (md_escape(label or "Figure %d" % n), name)
+
+
+def md_inline(node, ctx):
     out = []
-    for ln in lines:
-        m = re.match(r"^(\s*)(?:[-*]|(\d+)[.)])\s+(.*)$", ln)
-        if m:
-            out.append(
-                (len(m.group(1)) // 2, m.group(3).rstrip(), m.group(2) is not None)
-            )
-        elif out and ln.strip():
-            d, t, o = out[-1]
-            out[-1] = (d, (t + " " + ln.strip()).strip(), o)
+    for k in node.kids:
+        if isinstance(k, str):
+            out.append(md_escape(re.sub(r"\s+", " ", k), ctx.table))
+            continue
+        t = k.tag
+        if t == "span" and "num" in k.cls():
+            continue
+        if t == "br":
+            out.append("<br>")
+        elif t == "code":
+            out.append(md_code(text_of(k), ctx.table))
+        elif t in ("b", "strong"):
+            out.append(md_emph(md_inline(k, ctx), "**"))
+        elif t in ("i", "em"):
+            out.append(md_emph(md_inline(k, ctx), "*"))
+        elif t == "a":
+            out.append(md_link(md_inline(k, ctx), k.attrs.get("href", "")))
+        elif t in ("sub", "sup", "kbd"):
+            out.append("<%s>%s</%s>" % (t, md_inline(k, ctx), t))
+        else:
+            out.append(md_inline(k, ctx))
+    return "".join(out)
+
+
+def md_para(node, ctx):
+    return md_lead(re.sub(r" {2,}", " ", md_inline(node, ctx)).strip())
+
+
+def md_blocks(node, ctx):
+    """-> markdown blocks for node's children; loose inline runs become paragraphs."""
+    out, run = [], Node("#run")
+    for k in node.kids + [None]:
+        if k is not None and (isinstance(k, str) or k.tag not in MD_BLOCKS):
+            run.kids.append(k)
+            continue
+        if run.kids:
+            p = md_para(run, ctx)
+            if p:
+                out.append(p)
+            run.kids = []
+        if k is not None:
+            out.extend(md_block(k, ctx))
     return out
 
 
-def render_list(items, cls=""):
-    if not items:
-        return ""
-    attr = ' class="%s"' % cls if cls else ""
-    out, stack = [], []
-    for d, text, ordered in items:
-        tag = "ol" if ordered else "ul"
-        d = min(d, len(stack))
-        while len(stack) > d + 1:
-            out.append("</li></%s>" % stack.pop())
-        if len(stack) == d + 1:
-            out.append("</li>")
-        else:
-            out.append("<%s%s>" % (tag, attr if not stack else ""))
-            stack.append(tag)
-        out.append("<li>%s" % inline(text))
-    while stack:
-        out.append("</li></%s>" % stack.pop())
-    return "".join(out)
+def md_quote(blocks):
+    return "\n".join(("> " + ln) if ln else ">" for ln in "\n\n".join(blocks).split("\n"))
 
 
-def render_table(rows):
-    cells = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
-    head = len(cells) > 1 and all(
-        re.fullmatch(r":?-{2,}:?", c) for c in cells[1] if c
-    )
-    out = ['<div class="scroll"><table>']
-    body = cells[2:] if head else cells
-    if head:
-        out.append(
-            "<tr>%s</tr>" % "".join("<th>%s</th>" % inline(c) for c in cells[0])
-        )
-    for row in body:
-        out.append("<tr>%s</tr>" % "".join("<td>%s</td>" % inline(c) for c in row))
-    out.append("</table></div>")
-    return "".join(out)
+def md_titled(k, ctx):
+    """A card or flag: (its leading <h3> as text, the rest as blocks)."""
+    kids = [x for x in k.kids if not (isinstance(x, str) and not x.strip())]
+    if kids and not isinstance(kids[0], str) and kids[0].tag == "h3":
+        rest = Node("#body")
+        rest.kids = kids[1:]
+        return md_para(kids[0], ctx), md_blocks(rest, ctx)
+    return "", md_blocks(k, ctx)
 
 
-ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+")
-HR_RE = re.compile(r"\s*(---+|\*\*\*+)\s*$")
-STOP = (":::", "```", "|", "###")
+def md_block(k, ctx):
+    t, c = k.tag, k.cls()
+    if t == "h1":
+        return ["# " + md_para(k, ctx)]
+    if t == "h2":
+        num = next((text_of(x).strip() for x in k.kids
+                    if not isinstance(x, str) and "num" in x.cls()), "")
+        return ["## %s%s" % (num + ". " if num else "", md_para(k, ctx))]
+    if t in ("h3", "h4"):
+        return ["#" * int(t[1]) + " " + md_para(k, ctx)]
+    if t == "p":
+        p = md_para(k, ctx)
+        return [md_emph(p, "*") if "meta" in c else p] if p else []
+    if t == "hr":
+        return ["---"]
+    if t == "pre":
+        return [md_fence(k)]
+    if t in ("ul", "ol"):
+        return [md_list(k, ctx)] if k.kids else []
+    if t == "table":
+        return [md_table(k, ctx)]
+    if t == "rdfig":
+        return [ctx.figure(k)]
+    if "flag" in c:
+        kind = next((x for x in c if x in ALERT), "info")
+        title, body = md_titled(k, ctx)
+        pill = k.attrs.get("data-pill", "").strip()
+        head = " · ".join(x for x in (
+            "*%s*" % md_escape(pill) if pill else "",
+            "**%s**" % title if title else "") if x)
+        return ["> [!%s]\n" % ALERT[kind] + md_quote(([head] if head else []) + body)]
+    if "card" in c:
+        title, body = md_titled(k, ctx)
+        return [md_quote((["**%s**" % title] if title else []) + body)]
+    if t == "blockquote" or "analogy" in c:
+        return [md_quote(md_blocks(k, ctx))]
+    return md_blocks(k, ctx)        # section, header, grid, scroll, strays
 
 
-def scan_list(lines, i):
-    """Consume one list, allowing blank lines between items. -> end index."""
-    n, j = len(lines), i
-    while j < n:
-        if is_blank(lines[j]):
-            k = j
-            while k < n and is_blank(lines[k]):
-                k += 1
-            if k < n and (ITEM_RE.match(lines[k]) or lines[k].startswith(("  ", "\t"))):
-                j = k
+def md_fence(pre):
+    code = next((x for x in pre.kids if not isinstance(x, str) and x.tag == "code"), None)
+    src = text_of(code if code is not None else pre).strip("\n")
+    lang = ""
+    if code is not None:
+        m = re.search(r"\blanguage-([\w+#-]+)", code.attrs.get("class") or "")
+        lang = m.group(1) if m else ""
+    runs = [len(r) for r in re.findall(r"`{3,}", src)]
+    fence = "`" * max([3] + [n + 1 for n in runs])
+    return "%s%s\n%s\n%s" % (fence, lang, src, fence)
+
+
+def md_list(k, ctx):
+    ordered = k.tag == "ol"
+    mark = "✓ " if "tick" in k.cls() else "✗ " if "cross" in k.cls() else ""
+    items, n = [], 0
+    for li in k.kids:
+        if isinstance(li, str) or li.tag != "li":
+            continue
+        n += 1
+        bullet = "%d. " % n if ordered else "- "
+        pad = " " * len(bullet)
+        blocks = md_blocks(li, ctx) or [""]
+        text = bullet + mark + blocks[0].replace("\n", "\n" + pad)
+        for b in blocks[1:]:
+            tight = re.match(r"(- |\d+\. )", b)     # a nested list hugs its item
+            text += ("\n" if tight else "\n\n") + pad + b.replace("\n", "\n" + pad)
+        items.append(text)
+    return "\n".join(items)
+
+
+def md_table(k, ctx):
+    rows = []
+
+    def walk(n):
+        for x in n.kids:
+            if isinstance(x, str):
                 continue
-            return j
-        if lines[j].strip().startswith(STOP) or HR_RE.fullmatch(lines[j]):
-            return j
-        j += 1
-    return j
+            if x.tag == "tr":
+                rows.append([cell(c) for c in x.kids
+                             if not isinstance(c, str) and c.tag in ("th", "td")])
+            elif x.tag in ("thead", "tbody"):
+                walk(x)
+
+    def cell(c):
+        was, ctx.table = ctx.table, True
+        try:
+            return "<br>".join(b.replace("\n", " ") for b in md_blocks(c, ctx))
+        finally:
+            ctx.table = was
+
+    walk(k)
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * width]
+    lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
+    return "\n".join(lines)
 
 
-def render_blocks(lines):
-    """Everything except `##` headings (the section splitter owns those)."""
-    out, i, n = [], 0, len(lines)
-    while i < n:
-        ln = lines[i]
-        if is_blank(ln):
-            i += 1
-            continue
-
-        if ln.strip().startswith(":::"):
-            name, args, body, i = take_directive(lines, i)
-            out.append(directive(name, args, body))
-            continue
-
-        if ln.lstrip().startswith("```"):
-            j, buf = i + 1, []
-            while j < n and not lines[j].strip().startswith("```"):
-                buf.append(lines[j])
-                j += 1
-            out.append("<pre><code>%s</code></pre>" % esc("\n".join(buf)))
-            i = j + 1
-            continue
-
-        if re.match(r"^###\s+", ln):
-            out.append("<h3>%s</h3>" % inline(ln.split(None, 1)[1].strip()))
-            i += 1
-            continue
-
-        if HR_RE.fullmatch(ln):
-            out.append("<hr>")
-            i += 1
-            continue
-
-        if ln.strip().startswith("|"):
-            j = i
-            while j < n and lines[j].strip().startswith("|"):
-                j += 1
-            out.append(render_table(lines[i:j]))
-            i = j
-            continue
-
-        if ITEM_RE.match(ln):
-            j = scan_list(lines, i)
-            out.append(render_list(list_items(lines[i:j])))
-            i = j
-            continue
-
-        j = i
-        while (
-            j < n
-            and not is_blank(lines[j])
-            and not lines[j].strip().startswith(STOP)
-            and not HR_RE.fullmatch(lines[j])
-            and not ITEM_RE.match(lines[j])
-        ):
-            j += 1
-        if j == i:
-            j += 1
-        out.append("<p>%s</p>" % inline(" ".join(x.strip() for x in lines[i:j])))
-        i = j
-    return "".join(out)
+def standalone_svg(svg):
+    """An inline diagram as a file of its own. Its colours are CSS variables
+    the page defines, so bring the light palette along or strokes vanish."""
+    m = re.match(r"<svg\b[^>]*>", svg, re.I)
+    if not m:
+        return svg
+    tag = m.group(0)
+    if "xmlns=" not in tag:
+        tag = tag[:4] + ' xmlns="http://www.w3.org/2000/svg"' + tag[4:]
+    if "xlink:" in svg and "xmlns:xlink" not in tag:
+        tag = tag[:4] + ' xmlns:xlink="http://www.w3.org/1999/xlink"' + tag[4:]
+    pal = re.search(r"prefers-color-scheme: light\)\{\s*:root\{(.*?)\}", CSS, re.S)
+    style = "<style>:root{%s}text{font-family:-apple-system,BlinkMacSystemFont," \
+            "'Segoe UI',Roboto,Helvetica,Arial,sans-serif}</style>" \
+            % re.sub(r"\s+", "", pal.group(1) if pal else "")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + tag + style + svg[m.end():] + "\n"
 
 
-def paragraphs(lines):
-    """Split on blank lines, return list of joined single-line paragraphs."""
-    out, buf = [], []
-    for ln in lines + [""]:
-        if is_blank(ln):
-            if buf:
-                out.append(" ".join(x.strip() for x in buf))
-                buf = []
-        else:
-            buf.append(ln)
-    return out
-
-
-def directive(name, args, body):
-    if name == "html":
-        return "\n".join(body)
-
-    if name == "flag":
-        parts = args.split("|", 1)
-        title = parts[1].strip() if len(parts) > 1 else ""
-        words = parts[0].split()
-        if words and words[0] in ("good", "warn", "bad", "info"):
-            kind, pill = words[0], " ".join(words[1:])
-        else:
-            kind, pill = "info", " ".join(words)
-        cls = "" if kind == "info" else " " + kind
-        head = ""
-        if pill or title:
-            bits = ""
-            if pill:
-                bits += '<span class="pill%s">%s</span>' % (cls, inline(pill))
-            if title:
-                bits += inline(title)
-            head = '<div class="t">%s</div>' % bits
-        return '<div class="flag%s">%s%s</div>' % (cls, head, render_blocks(body))
-
-    if name == "card":
-        head = "<h3>%s</h3>" % inline(args) if args else ""
-        return '<div class="card">%s%s</div>' % (head, render_blocks(body))
-
-    if name == "analogy":
-        return '<div class="an">%s</div>' % "<br><br>".join(
-            inline(p) for p in paragraphs(body)
-        )
-
-    if name == "lede":
-        return "".join('<p class="lede">%s</p>' % inline(p) for p in paragraphs(body))
-
-    if name == "steps":
-        out = []
-        for k, (_, text, _) in enumerate(list_items(body), 1):
-            out.append(
-                '<div class="step"><div class="stepn">%d</div><div>%s</div></div>'
-                % (k, inline(text))
-            )
-        return "".join(out)
-
-    if name in ("tick", "cross"):
-        return render_list(list_items(body), cls=name)
-
-    sys.stderr.write("reviewdoc: warning: unknown directive :::%s (rendered as card)\n" % name)
-    return '<div class="card">%s</div>' % render_blocks(body)
-
-
-def split_sections(lines, intro_title):
-    """-> [(id, title, html)]. Slot 0 is always the intro (content before the
-    first `##`), so the page header has somewhere to live and text selected up
-    there still anchors. `##` inside a fence or a ::: block is not a heading."""
-    chunks, cur, num = [], [intro_title, [], None], 0
-    fence, depth = False, 0
-    for ln in lines:
-        s = ln.strip()
-        if s.startswith("```"):
-            fence = not fence
-        elif not fence:
-            if s == ":::":
-                depth = max(0, depth - 1)
-            elif re.match(r":::\w+", s):
-                depth += 1
-        m = None if (fence or depth) else re.match(r"^##\s+(.*)$", ln)
-        if m:
-            chunks.append(cur)
-            num += 1
-            cur = [m.group(1).strip(), [], num]
-        else:
-            cur[1].append(ln)
-    chunks.append(cur)
-
-    out, seen = [], {}
-    for k, (title, body, num) in enumerate(chunks):
-        if k and not any(x.strip() for x in body) and not title:
-            continue
-        head = ""
-        if num is not None:
-            head = '<h2><span class="num">%d</span>%s</h2>' % (num, inline(title))
-        if k == 0:
-            sid = "sec-intro"
-        else:
-            sid = "sec-" + slugify(title)
-            seen[sid] = seen.get(sid, 0) + 1
-            if seen[sid] > 1:
-                sid = "%s-%d" % (sid, seen[sid])
-        out.append((sid, title, head + render_blocks(body)))
-    return out
+def to_markdown(sections, source_name, stem, files=None):
+    """sections: [(id, title, html)] as built. files: a list that collects
+    (filename, svg) for each diagram, or None to leave a line in its place."""
+    ctx = MdCtx(stem, files)
+    blocks = []
+    for _sid, _title, body in sections:
+        t = Tree()
+        t.feed(FIG_RE.sub(ctx.stash, body))
+        t.close()
+        blocks.extend(md_blocks(t.root, ctx))
+    head = "%s from %s; edits here are not read back -->" % (GEN_MARK, source_name)
+    return "\n\n".join([head] + [b for b in blocks if b.strip()]) + "\n"
 
 
 # --------------------------------------------------------------------------
@@ -576,6 +871,7 @@ CSS = r"""
   h2{font-size:clamp(21px,3.4vw,28px);margin:56px 0 8px;letter-spacing:-.01em}
   h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px;font-weight:600}
   h3{font-size:18px;margin:28px 0 8px}
+  h4{font-size:16px;margin:22px 0 6px}
   p{margin:0 0 14px}
   a{color:var(--accent)}
   .lede{color:var(--dim);margin:0 0 24px;font-size:17px;max-width:66ch}
@@ -584,6 +880,9 @@ CSS = r"""
   pre{background:var(--card2);border:1px solid var(--line);border-radius:11px;padding:15px 16px;
     overflow-x:auto;margin:14px 0;font-family:var(--mono);font-size:13px;line-height:1.55}
   pre code{background:none;border:none;padding:0;font-size:inherit}
+  kbd{font-family:var(--mono);font-size:.82em;background:var(--card2);padding:1px 6px;
+    border:1px solid var(--line);border-bottom-width:2px;border-radius:5px}
+  .wrap blockquote{margin:16px 0;padding-left:14px;border-left:3px solid var(--line);color:var(--dim)}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
   .card>h3:first-child{margin-top:0}
   .grid{display:grid;gap:16px}
@@ -593,13 +892,19 @@ CSS = r"""
     border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
   .flag.bad{border-left-color:var(--bad)} .flag.warn{border-left-color:var(--warn)}
   .flag.good{border-left-color:var(--good)}
-  .flag .t{font-weight:650;margin-bottom:6px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .flag>p:last-child,.flag>ul:last-child,.flag>ol:last-child,.flag>div:last-child{margin-bottom:0}
-  .pill{display:inline-block;font-size:12px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;
-    padding:3px 9px;border-radius:999px;background:var(--card2);color:var(--dim);border:1px solid var(--line)}
-  .pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
-  .pill.good{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
-  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+  .flag>h3:first-child{font-size:16.5px;font-weight:650;margin:0 0 6px}
+  .flag>:last-child,.card>:last-child,.analogy>:last-child{margin-bottom:0}
+  /* the pill is generated from data-pill, so its text is never part of what a
+     note anchors against, in the browser or in reviewdoc.py */
+  .flag[data-pill]::before{content:attr(data-pill);display:inline-block;vertical-align:2px;
+    font-size:12px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;line-height:1.35;
+    padding:3px 9px;border-radius:999px;background:var(--card2);color:var(--dim);
+    border:1px solid var(--line);margin-right:9px}
+  .flag[data-pill]>h3:first-child{display:inline;margin:0}
+  .flag[data-pill]>h3:first-child+*,.flag[data-pill]>:first-child:not(h3){margin-top:10px}
+  .flag.bad[data-pill]::before{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+  .flag.good[data-pill]::before{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+  .flag.warn[data-pill]::before{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
   svg{display:block;max-width:100%;height:auto;margin:10px auto}
   table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
   th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -611,11 +916,15 @@ CSS = r"""
   .cross{list-style:none;padding-left:0} .cross li{padding-left:28px;position:relative}
   .cross li::before{content:"\2715";position:absolute;left:4px;color:var(--bad);font-weight:700}
   .small{font-size:14px;color:var(--dim)}
-  .step{display:flex;gap:14px;margin-bottom:16px}
-  .stepn{flex:0 0 26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;
-    display:grid;place-items:center;font-size:13px;font-weight:700;margin-top:3px}
+  /* numbers drawn by CSS, like the pill: not text, so never in an anchor */
+  ol.steps{list-style:none;padding-left:0;counter-reset:rd-step}
+  ol.steps>li{counter-increment:rd-step;position:relative;padding-left:40px;margin-bottom:16px;
+    min-height:28px}
+  ol.steps>li::before{content:counter(rd-step);position:absolute;left:0;top:1px;width:26px;
+    height:26px;border-radius:50%;background:var(--accent);color:#fff;display:grid;
+    place-items:center;font-size:13px;font-weight:700;line-height:1}
   hr{border:none;border-top:1px solid var(--line);margin:48px 0}
-  .an{color:var(--dim);font-style:italic;border-left:3px solid var(--accent);padding-left:14px;margin:16px 0}
+  .analogy{color:var(--dim);font-style:italic;border-left:3px solid var(--accent);padding-left:14px;margin:16px 0}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 
   /* ---------- top toolbar ---------- */
@@ -802,7 +1111,9 @@ JS = r"""
   var LABELS = __LABELS__;        /* display labels, including the bar-only tags */
   var NO_BODY_TAGS = __NO_BODY_TAGS__;
   var CLOSING_TAGS = __CLOSING_TAGS__;
-  var KEY = 'reviewdoc:' + DOC.slug;
+  /* keyed on the document's own id, not its file name: every file:// page may
+     share one storage area, and two repos can both hold a plan.html */
+  var KEY = 'reviewdoc:' + DOC.id;
 
   var embedded = [];
   try{ embedded = JSON.parse(document.getElementById('rd-notes').textContent || '[]') || []; }
@@ -1301,7 +1612,7 @@ JS = r"""
     if(quote.length < 2) return null;
     var sc = r.startContainer, el = sc.nodeType === 1 ? sc : sc.parentElement;
     var host = el && el.closest ? el.closest('section.rd-sec') : null;
-    var blk = el && el.closest ? el.closest('p,li,td,th,h2,h3,pre,blockquote,.an,.t') : null;
+    var blk = el && el.closest ? el.closest('p,li,td,th,h1,h2,h3,h4,pre,blockquote') : null;
     var nodes = host ? secNodes(host) : [];
     var start = host ? offsetOf(nodes, r.startContainer, r.startOffset) : -1;
     var lead = r.toString().indexOf(quote);
@@ -1421,7 +1732,19 @@ JS = r"""
     var m = e.target.closest && e.target.closest('mark.rd-hl');
     if(m) focusThread(m.dataset.noteId);
   });
-  /* ---------- top toolbar: how-to + full screen ---------- */
+  /* ---------- top toolbar: how-to, markdown, full screen ---------- */
+  /* build renders the markdown once, in Python, and embeds it: one converter,
+     not a second copy in here that drifts from `reviewdoc.py md` */
+  var mdBtn = document.getElementById('rd-mdx');
+  if(mdBtn) mdBtn.addEventListener('click', function(){
+    var md = '';
+    try{ md = JSON.parse(document.getElementById('rd-md').textContent || '""'); }catch(e){}
+    if(!md){ toast('This page has no markdown copy — rebuild it'); return; }
+    saveFile(md, DOC.slug + '.md', MD_FILE).then(function(how){
+      if(how !== 'cancel') toast(how === 'picked' ? 'Markdown saved' : 'Markdown saved to Downloads');
+    });
+  });
+
   var help = document.getElementById('rd-help'),
       howBtn = document.getElementById('rd-howto'),
       fsBtn = document.getElementById('rd-fs'),
@@ -1517,34 +1840,36 @@ JS = r"""
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(u); }, 1500);
   }
-  // Prefer a native save dialog (File System Access API) so notes can land in
+  // Prefer a native save dialog (File System Access API) so a file can land in
   // the project folder Claude is reading, not just ~/Downloads. Chrome remembers
-  // the last-used directory via the `id`. Falls back to a plain download when the
-  // API is missing or refuses (e.g. some file:// origins). Resolves to one of
+  // the last-used directory per `kind.id`. Falls back to a plain download when
+  // the API is missing or refuses (e.g. some file:// origins). Resolves to one of
   // 'picked' | 'download' | 'cancel'.
-  function saveNotes(text, name){
+  var NOTES_FILE = {id:'reviewdoc-notes', what:'Notes JSON', mime:'application/json', ext:'.json'},
+      MD_FILE = {id:'reviewdoc-md', what:'Markdown', mime:'text/markdown', ext:'.md'};
+  function saveFile(text, name, kind){
     if(window.showSaveFilePicker){
       return (async function(){
-        var handle;
+        var handle, accept = {};
+        accept[kind.mime] = [kind.ext];
         try{
           handle = await window.showSaveFilePicker({
-            suggestedName: name, id: 'reviewdoc-notes',
-            types: [{description:'Notes JSON', accept:{'application/json':['.json']}}]
+            suggestedName: name, id: kind.id, types: [{description:kind.what, accept:accept}]
           });
         }catch(err){
           if(err && err.name === 'AbortError') return 'cancel';
-          download(text, name, 'application/json'); return 'download';
+          download(text, name, kind.mime); return 'download';
         }
         try{
           var w = await handle.createWritable();
           await w.write(text); await w.close();
           return 'picked';
         }catch(err){
-          download(text, name, 'application/json'); return 'download';
+          download(text, name, kind.mime); return 'download';
         }
       })();
     }
-    download(text, name, 'application/json');
+    download(text, name, kind.mime);
     return Promise.resolve('download');
   }
   function toMd(){
@@ -1581,7 +1906,9 @@ JS = r"""
   panel.querySelector('[data-export]').addEventListener('click', function(){
     var ts = payload();
     if(!ts.length){ toast('Nothing to export yet'); return; }
-    Promise.resolve(saveNotes(JSON.stringify(ts, null, 1), DOC.slug + '-notes.json'))
+    /* the doc id rides along so `import` can refuse notes meant for another page */
+    var out = {doc:DOC.id, file:DOC.file, notes:ts};
+    Promise.resolve(saveFile(JSON.stringify(out, null, 1), DOC.slug + '-notes.json', NOTES_FILE))
       .then(function(how){
         if(how === 'cancel') return;
         toast((how === 'picked' ? 'Saved' : 'Saved to Downloads') +
@@ -1632,7 +1959,7 @@ PANEL = """
   <div class="rd-list"></div>
   <div class="rd-foot">
     <button class="rd-big" type="button" data-export>&#10003; Export notes for Claude</button>
-    <button class="rd-lite" type="button" data-copy>Copy as markdown</button>
+    <button class="rd-lite" type="button" data-copy>Copy notes as markdown</button>
     <button class="rd-lite" type="button" data-general>+ Note not tied to any text</button>
   </div>
 </aside>
@@ -1667,7 +1994,8 @@ HELP = """
     which saves a JSON file. Tell Claude when you're done and it will read your notes, reply in the
     panel, and rebuild the page.</p>
     <p class="small">&#8677; in the panel header hides the panel and centres the text.
-    <b>&#10530; Full screen</b> at the top of the page hides the browser chrome.</p>
+    <b>&#8595; Markdown</b> at the top of the page saves the document itself as a
+    markdown file. <b>&#10530; Full screen</b> hides the browser chrome.</p>
     <div class="row"><button type="button" data-help-close>Got it</button></div>
   </div>
 </div>
@@ -1679,25 +2007,29 @@ def toolbar(with_help):
     bits = []
     if with_help:
         bits.append('<button type="button" id="rd-howto">&#9432; How to use this page</button>')
+    bits.append('<button type="button" id="rd-mdx" title="Save this document as a markdown '
+                'file">&#8595; Markdown</button>')
     bits.append('<button type="button" id="rd-fs">&#10530; Full screen</button>')
     return '<div class="rd-tools">%s</div>' % "".join(bits)
 
 
-def render_html(src_text, out_name, old_notes):
-    meta, lines = front_matter(src_text.splitlines())
-    title = meta.get("title") or out_name
-    slug = slugify(meta.get("slug") or os.path.splitext(out_name)[0])
-    sections = split_sections(lines, title)
+def fill(template, values):
+    """One pass over the template only, so a document that happens to contain
+    `__JS__` in its prose is never mistaken for a placeholder."""
+    return re.sub(r"__([A-Z_]+)__", lambda m: values.get(m.group(1), m.group(0)), template)
 
-    head = ["<header>", "<h1>%s</h1>" % inline(title)]
-    if meta.get("subtitle"):
-        head.append('<p class="sub">%s</p>' % inline(meta["subtitle"]))
-    if meta.get("meta"):
-        head.append('<p class="meta">%s</p>' % inline(meta["meta"]))
-    head.append("</header>")
 
-    sid, stitle, body = sections[0]
-    sections[0] = (sid, stitle, "".join(head) + body)
+def js_json(obj):
+    """JSON that is safe to drop inside a <script> element."""
+    return json.dumps(obj, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
+
+
+def render_html(src_text, src_path, out_name, old_html=None):
+    stem = os.path.splitext(out_name)[0]
+    meta, title, sections = parse_source(src_text, src_path, stem)
+    slug = slugify(meta.get("slug") or stem)
+    m = DOCID_RE.search(old_html or "")
+    doc_id = m.group(1) if m else uuid.uuid4().hex[:16]
 
     # the toolbar sits inside .wrap but outside every section, so its button
     # labels never land in the text a note is anchored against
@@ -1708,27 +2040,27 @@ def render_html(src_text, out_name, old_notes):
         for sid, stitle, body in sections
     )
 
-    notes = [normalise(n, i) for i, n in enumerate(old_notes or [])]
+    old_notes = read_notes(old_html, out_name) if old_html else []
+    notes = [normalise(n, i) for i, n in enumerate(old_notes)]
     stats = reanchor(notes, [(s[0], s[1], section_text(s[2])) for s in sections])
 
-    js = (
-        JS.replace(
-            "__DOC__",
-            json.dumps({"slug": slug, "file": out_name, "title": title}, ensure_ascii=False),
-        )
-        .replace("__TAGS__", json.dumps(TAGS, ensure_ascii=False))
-        .replace("__LABELS__", json.dumps(dict(BAR_TAGS, **TAGS), ensure_ascii=False))
-        .replace("__NO_BODY_TAGS__", json.dumps(sorted(NO_BODY_TAGS)))
-        .replace("__CLOSING_TAGS__", json.dumps(sorted(CLOSING_TAGS)))
-    )
+    js = fill(JS, {
+        "DOC": js_json({"id": doc_id, "slug": slug, "file": out_name, "title": title}),
+        "TAGS": js_json(TAGS),
+        "LABELS": js_json(dict(BAR_TAGS, **TAGS)),
+        "NO_BODY_TAGS": js_json(sorted(NO_BODY_TAGS)),
+        "CLOSING_TAGS": js_json(sorted(CLOSING_TAGS)),
+    })
     payload = json.dumps(notes, ensure_ascii=False, indent=1)
     payload = payload.replace("<", "\\u003c").replace(">", "\\u003e")
+    md = js_json(to_markdown(sections, out_name, slug))
 
     html = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="reviewdoc-id" content="__ID__">
 <title>__TITLE__</title>
 <style>__CSS__</style>
 </head>
@@ -1740,60 +2072,60 @@ __PANEL__
 <script id="rd-notes" type="application/json">
 __NOTES__
 </script>
+<script id="rd-md" type="application/json">__MD__</script>
 <script>__JS__</script>
 </body>
 </html>
 """
-    for k, v in (
-        ("__TITLE__", esc(re.sub(r"<[^>]+>", "", inline(title)))),
-        ("__CSS__", CSS),
-        ("__BODY__", body_html),
-        ("__PANEL__", PANEL + (HELP if with_help else "")),
-        ("__NOTES__", payload),
-        ("__JS__", js),
-    ):
-        html = html.replace(k, v, 1)
-    return html, stats
+    return fill(html, {
+        "ID": doc_id,
+        "TITLE": esc(title),
+        "CSS": CSS,
+        "BODY": body_html,
+        "PANEL": PANEL + (HELP if with_help else ""),
+        "NOTES": payload,
+        "MD": md,
+        "JS": js,
+    }), stats
 
 
 # --------------------------------------------------------------------------
 # commands
 # --------------------------------------------------------------------------
 
-STARTER = """---
-title: __TITLE__
-subtitle: One sentence saying what this is and why it matters to the reader.
-meta: __META__
----
+SRC_EXT = ".src.html"
 
-:::lede
-Open with the whole answer in plain language, before any detail. Assume the reader
-has no background in this topic.
-:::
+STARTER = """<h1>__TITLE__</h1>
+<p class="sub">One sentence saying what this is and why it matters to the reader.</p>
+<p class="meta">__META__</p>
 
-## What is going on
+<p class="lede">Open with the whole answer in plain language, before any detail.</p>
 
-:::analogy
-Reach for a concrete everyday comparison here. Analogies are the point of this format.
-:::
+<h2>What is going on</h2>
 
-:::flag warn heads up | Something worth pausing on
-Explain the risk in one short paragraph.
-:::
+<div class="analogy">
+  <p>A concrete everyday comparison, for a mechanism that is abstract to this reader.</p>
+</div>
 
-## What I recommend
+<div class="flag warn" data-pill="heads up">
+  <h3>Something worth pausing on</h3>
+  <p>Explain the risk in one short paragraph.</p>
+</div>
 
-:::steps
-1. First thing to do.
-2. Second thing.
-3. Third thing.
-:::
+<h2>What I recommend</h2>
 
-## What I need from you
+<ol class="steps">
+  <li>First thing to do.</li>
+  <li>Second thing.</li>
+  <li>Third thing.</li>
+</ol>
 
-| Decision | My recommendation |
-|---|---|
-| Something you must choose | `yes` and why |
+<h2>What I need from you</h2>
+
+<table>
+  <tr><th>Decision</th><th>My recommendation</th></tr>
+  <tr><td>Something you must choose</td><td><code>yes</code>, and why</td></tr>
+</table>
 """
 
 
@@ -1805,32 +2137,42 @@ def read(path):
         die("cannot read %s (%s)" % (path, e.strerror))
 
 
+def write(path, text):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+    except IOError as e:
+        die("cannot write %s (%s)" % (path, e.strerror))
+
+
 def cmd_new(a):
-    path = a.name if a.name.endswith(".md") else a.name + ".md"
+    base = re.sub(r"(\.src)?\.html$", "", a.name)
+    path = base + SRC_EXT
     if os.path.exists(path):
         die("%s already exists" % path)
-    title = a.title or os.path.basename(path)[:-3].replace("-", " ").replace("_", " ").capitalize()
-    text = STARTER.replace("__TITLE__", title).replace(
-        "__META__", datetime.now().strftime("%Y-%m-%d")
-    )
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    title = a.title or os.path.basename(base).replace("-", " ").replace("_", " ").capitalize()
+    write(path, STARTER.replace("__TITLE__", esc(title)).replace(
+        "__META__", datetime.now().strftime("%Y-%m-%d")))
     print("wrote %s" % path)
 
 
 def cmd_build(a):
+    if a.src.endswith(".md"):
+        die("%s: sources are HTML fragments now (<name>%s), markdown is no longer "
+            "read. See \"Source format\" in SKILL.md." % (a.src, SRC_EXT))
     if not os.path.exists(a.src):
         die("no such source file: %s" % a.src)
-    out = a.out or os.path.splitext(a.src)[0] + ".html"
-    old = []
-    if os.path.exists(out):
-        old = read_notes(read(out), out)
-    html, stats = render_html(read(a.src), os.path.basename(out), old)
-    try:
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(html)
-    except IOError as e:
-        die("cannot write %s (%s)" % (out, e.strerror))
+    if a.out:
+        out = a.out
+    elif a.src.endswith(SRC_EXT):
+        out = a.src[: -len(SRC_EXT)] + ".html"
+    else:
+        die("name the source <name>%s (it builds <name>.html), or pass -o" % SRC_EXT)
+    if os.path.abspath(out) == os.path.abspath(a.src):
+        die("the output would overwrite the source")
+    old = read(out) if os.path.exists(out) else None
+    html, stats = render_html(read(a.src), a.src, os.path.basename(out), old)
+    write(out, html)
     msg = "built %s (%d bytes)" % (out, len(html.encode("utf-8")))
     if old:
         msg += " — notes: %d kept, %d re-anchored, %d unanchored" % (
@@ -1847,6 +2189,24 @@ def cmd_build(a):
             sys.stderr.write("reviewdoc: could not run %s\n" % opener)
 
 
+def cmd_md(a):
+    html = read(a.doc)
+    read_notes(html, a.doc)             # proves it is a reviewdoc build
+    out = a.out or os.path.splitext(a.doc)[0] + ".md"
+    if os.path.exists(out) and not a.force:
+        with open(out, "r", encoding="utf-8", errors="replace") as f:
+            first = f.readline()
+        if not first.startswith(GEN_MARK):
+            die("%s exists and was not written by `md`; pass --force to replace it" % out)
+    stem = os.path.splitext(os.path.basename(out))[0]
+    figs = []
+    md = to_markdown(SEC_RE.findall(html), os.path.basename(a.doc), stem, figs)
+    write(out, md)
+    for name, svg in figs:
+        write(os.path.join(os.path.dirname(out), name), svg)
+    print("wrote %s%s" % (out, " + %d figure file(s)" % len(figs) if figs else ""))
+
+
 def cmd_import(a):
     html = read(a.doc)
     notes = read_notes(html, a.doc)
@@ -1854,8 +2214,13 @@ def cmd_import(a):
         incoming = json.loads(read(a.notes))
     except ValueError as e:
         die("%s is not valid JSON (%s)" % (a.notes, e))
-    if isinstance(incoming, dict) and isinstance(incoming.get("notes"), list):
-        incoming = incoming["notes"]      # tolerate a {"notes":[...]} wrapper
+    if isinstance(incoming, dict):
+        mine = DOCID_RE.search(html)
+        if mine and incoming.get("doc") and incoming["doc"] != mine.group(1):
+            die("%s was exported from another document (%s), not %s"
+                % (a.notes, incoming.get("file") or incoming["doc"], a.doc))
+        if isinstance(incoming.get("notes"), list):
+            incoming = incoming["notes"]
     if not isinstance(incoming, list):
         die("%s must contain a JSON array of notes" % a.notes)
     if not all(isinstance(x, dict) and "id" in x for x in incoming):
@@ -2028,16 +2393,23 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="reviewdoc.py", description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd")
 
-    q = sub.add_parser("new", help="scaffold a starter .md")
+    q = sub.add_parser("new", help="scaffold a starter <name>.src.html")
     q.add_argument("name")
     q.add_argument("--title")
     q.set_defaults(fn=cmd_new)
 
-    q = sub.add_parser("build", help="render .md -> self-contained .html, keeping notes")
+    q = sub.add_parser("build", help="check <name>.src.html, write <name>.html, keeping notes")
     q.add_argument("src")
     q.add_argument("-o", "--out")
     q.add_argument("--open", action="store_true")
     q.set_defaults(fn=cmd_build)
+
+    q = sub.add_parser("md", help="write a built document out as markdown, best effort")
+    q.add_argument("doc")
+    q.add_argument("-o", "--out")
+    q.add_argument("--force", action="store_true",
+                   help="replace an existing .md that `md` did not write")
+    q.set_defaults(fn=cmd_md)
 
     q = sub.add_parser("import", help="merge exported notes JSON into a built doc")
     q.add_argument("doc")
