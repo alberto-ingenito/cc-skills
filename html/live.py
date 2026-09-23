@@ -181,18 +181,35 @@ def claude_pid():
         if v and v.isdigit() and pid_alive(v):
             return int(v)
     pid = os.getppid()
-    for _ in range(6):
+    for _ in range(8):
         try:
-            out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)],
+            out = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(pid)],
                                  capture_output=True, text=True, timeout=2).stdout.split(None, 1)
         except (OSError, subprocess.SubprocessError):
             break
         if len(out) < 2:
             break
-        if "claude" in os.path.basename(out[1].strip()).lower():
+        if looks_like_claude(out[1]):
             return pid
         pid = int(out[0])
     return None
+
+
+SHELLS = {"sh", "bash", "zsh", "dash", "fish", "ksh", "tcsh", "csh"}
+
+
+def looks_like_claude(args):
+    """Is this command line the Claude Code process itself? Its short name is
+    just `node` for an npm install, and the shells Claude spawns mention
+    ~/.claude in their arguments, so look at the executable and the package."""
+    parts = args.strip().split()
+    if not parts:
+        return False
+    exe = os.path.basename(parts[0]).lstrip("-").lower()
+    if exe in SHELLS:
+        return False
+    return exe == "claude" or exe.startswith("claude-") or bool(
+        re.search(r"(@anthropic-ai/claude-code|/claude-code/)", args))
 
 
 def touch_session(pid, session_id=None):
@@ -292,6 +309,16 @@ class Docs(object):
 # HTTP
 # --------------------------------------------------------------------------
 
+LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def loopback(hostport):
+    """True for "127.0.0.1:47700", "localhost:51234", "[::1]:8000" and the like."""
+    host = hostport.strip().lower()
+    host = host.rsplit(":", 1)[0] if re.search(r":\d+$", host) else host
+    return host in LOOPBACK
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "reviewdoc/%d" % VERSION
     docs = None             # set by serve()
@@ -317,14 +344,14 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _host_ok(self):
-        # a DNS-rebinding page arrives with its own host name: refuse it
-        return self.headers.get("Host", "") in (
-            "127.0.0.1:%d" % self.port, "localhost:%d" % self.port)
+        # A DNS-rebinding page arrives with its own host name: refuse it. The
+        # port is not checked, because a forwarder (VS Code Remote-SSH, ssh -L)
+        # may expose this server on a different port on the reader's machine.
+        return loopback(self.headers.get("Host", ""))
 
     def _api_ok(self):
         origin = self.headers.get("Origin")
-        if origin and origin not in ("http://127.0.0.1:%d" % self.port,
-                                     "http://localhost:%d" % self.port):
+        if origin and not (origin.startswith("http://") and loopback(origin[7:])):
             return False
         # a custom header forces a CORS preflight, which is never granted, so
         # no other site can send this even if it guessed the token

@@ -2535,16 +2535,24 @@ def open_doc(path, html):
         url = live.url_for(doc_id(html))
     except ImportError:
         url = None
+    if url and os.environ.get("BROWSER"):
+        # VS Code sets $BROWSER in remote terminals to a helper that opens the
+        # URL on the reader's own machine and forwards the port on the way;
+        # the webbrowser module honours it
+        import webbrowser
+        print("live: %s (opening through $BROWSER)" % url)
+        webbrowser.open(url)
+        return
     if url:
         target = url
         print("live: %s" % url)
     else:
-        print("offline: the live server is not running; opened the file itself")
+        print("offline: the live server is not running; opening the file itself: %s" % target)
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
         subprocess.Popen([opener, target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
-        sys.stderr.write("reviewdoc: could not run %s\n" % opener)
+        sys.stderr.write("reviewdoc: could not run %s; open it by hand\n" % opener)
 
 
 def cmd_md(a):
