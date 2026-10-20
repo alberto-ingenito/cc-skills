@@ -57,8 +57,8 @@ you are in.
 **Offline.** The file opened on its own, from disk or an email. Notes stay in the
 browser until you press **Export notes for Claude**, which saves a JSON file; Claude
 reads it from beside the document or from `~/Downloads`. If a live server is running,
-the offline copy notices and offers **Open it live**, carrying your unsent notes
-across in the link.
+the offline copy notices and turns its main button into **Open it live**, carrying
+your unsent notes across in the link; Export moves to the smaller row beneath it.
 
 A live page whose server stops (Claude Code quit) says so and keeps working: notes
 wait in the browser and are written to the file as soon as the server is back. The
@@ -218,7 +218,10 @@ button under 900px, so it is usable on a phone. The **⇥** button in the panel 
 hides it on a desktop too, dropping the right gutter so the document centres on the
 full window; the floating **Review** button brings it back, and the choice is
 remembered per document in `localStorage`. Clicking a thread jumps to its mark;
-clicking a mark opens its thread. Resolved threads dim and fold. Printing hides the
+clicking a mark opens its thread. Resolved threads fold behind a dashed outline. An
+open thread where Claude spoke last carries a **Claude replied** badge: it is your
+turn. The Notes tab and the floating button both count open threads. **+ General
+note** above the list files a note that is not tied to any text. Printing hides the
 whole comment layer.
 
 Selecting text offers three buttons. **🖍 Highlight** just marks the passage — amber
@@ -227,6 +230,12 @@ selected word, nothing to type. **💬 Note** opens the tagged comment editor; a
 passage gets the blue underline instead. The panel has a tab for each, with a
 **Show open only** checkbox on the Notes tab. A highlight can be promoted to a note
 later from its card.
+
+Everything works from the keyboard. Select with Shift and the arrow keys and the bar
+appears; **H**, **C** and **N** press its buttons. Tab reaches every marked passage
+and every card; Enter on one jumps to the other. **⌘↩** saves a note, Escape closes
+whatever is on top. Dark mode puts dark text on the bright buttons, and motion follows
+the system's Reduce Motion setting.
 
 Notes are listed **newest activity first** — Claude's freshest answers and anything
 you just wrote sit at the top — rather than grouped by section. Each card still names
