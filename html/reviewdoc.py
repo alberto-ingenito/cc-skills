@@ -858,14 +858,14 @@ CSS = r"""
     --you:#c77dff; --panw:392px;
     /* text on an accent or good fill: dark on the bright dark-mode fills,
        white on the deeper light-mode ones (4.5:1 or better either way) */
-    --on-accent:#0f1115;
+    --on-accent:#0f1115; --hl:#ffd60a;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   @media (prefers-color-scheme: light){
     :root{ --bg:#f6f7f9; --card:#fff; --card2:#f0f2f5; --ink:#14171c; --dim:#5a6472;
            --line:#e1e5ea; --accent:#1a66d9; --good:#0f7a47; --warn:#946000; --bad:#c92a2a;
-           --you:#7d2fd0; --on-accent:#fff; }
+           --you:#7d2fd0; --on-accent:#fff; --hl:#ffcc00; }
   }
   *{box-sizing:border-box}
   /* `font:… inherit` is invalid (inherit cannot sit inside the shorthand) and
@@ -982,9 +982,9 @@ CSS = r"""
     padding:9px 13px;cursor:pointer}
   #rd-bar button:hover{filter:brightness(1.12)}
   #rd-bar button:focus-visible{outline-offset:-4px;outline-color:var(--on-accent)}
-  /* keyboard hint: a keycap drawn in the button's own text colour */
-  .rd-k{display:inline-block;margin-left:7px;padding:2px 5px;border-radius:4px;
-    font:500 11px/1 var(--sans);border:1px solid color-mix(in srgb,currentColor 50%,transparent)}
+  /* Highlight is the marker pen: system yellow, dark text in either mode */
+  #rd-bar [data-hl]{background:var(--hl);color:#14171c}
+  #rd-bar [data-hl]:focus-visible{outline-color:#14171c}
   #rd-fab{position:fixed;right:18px;bottom:18px;z-index:55;display:none;align-items:center;gap:8px;
     background:var(--accent);color:var(--on-accent);border:none;border-radius:999px;padding:13px 19px;cursor:pointer;
     font:650 14px/1 var(--sans);box-shadow:0 6px 22px rgba(0,0,0,.35)}
@@ -1774,7 +1774,7 @@ JS = r"""
     defer: 'Optional — say what should happen; Claude opens a backlog issue for it.'
   };
   var MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent),
-      SAVE_KEY = MAC ? '⌘↩' : 'Ctrl+↩', edReturn = null;
+      edReturn = null;
   edSave.setAttribute('aria-keyshortcuts', MAC ? 'Meta+Enter' : 'Control+Enter');
   Object.keys(TAGS).forEach(function(k){
     var b = document.createElement('button');
@@ -1817,8 +1817,7 @@ JS = r"""
     if(quote){ edQuote.textContent = '“' + quote + '”'; edQuote.style.display = 'block'; }
     else edQuote.style.display = 'none';
     edText.value = note ? (note.body || '') : '';
-    edSave.innerHTML = (note && !conv ? 'Update note' : 'Save note') +
-      '<span class="rd-k" aria-hidden="true">' + SAVE_KEY + '</span>';
+    edSave.textContent = note && !conv ? 'Update note' : 'Save note';
     ed.classList.add('open');
     setTimeout(function(){ edText.focus(); }, 50);
   }
@@ -2339,9 +2338,9 @@ JS = r"""
 
 PANEL = """
 <div id="rd-bar" role="toolbar" aria-label="Mark up the selection">
-  <button type="button" data-hl aria-keyshortcuts="H">&#128396; Highlight<span class="rd-k" aria-hidden="true">H</span></button>
-  <button type="button" data-clarify aria-keyshortcuts="C">&#128269; Clarify<span class="rd-k" aria-hidden="true">C</span></button>
-  <button type="button" data-note aria-keyshortcuts="N">&#128172; Note<span class="rd-k" aria-hidden="true">N</span></button>
+  <button type="button" data-hl aria-keyshortcuts="H">&#128396; Highlight</button>
+  <button type="button" data-clarify aria-keyshortcuts="C">&#128269; Clarify</button>
+  <button type="button" data-note aria-keyshortcuts="N">&#128172; Note</button>
 </div>
 
 <button id="rd-fab" type="button" aria-controls="rd-panel">&#128221; Review <span class="n">0</span></button>
