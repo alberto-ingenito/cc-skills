@@ -1734,7 +1734,7 @@ JS = r"""
   bar.querySelector('[data-note]').addEventListener('click', function(){
     pending = capture();
     if(!pending) return;
-    openEd(pending.quote);
+    openEd(pending.quote, null, window.getSelection().getRangeAt(0).getBoundingClientRect());
     clearSel();
     showPend();
   });
@@ -1807,7 +1807,7 @@ JS = r"""
     });
     edText.setAttribute('placeholder', NO_BODY_HINT[k] || PLACEHOLDER);
   }
-  function openEd(quote, note){
+  function openEd(quote, note, at){
     editing = note || null;
     edReturn = document.activeElement;
     var conv = !!note && note.kind === 'highlight';   /* highlight -> note */
@@ -1819,6 +1819,15 @@ JS = r"""
     edText.value = note ? (note.body || '') : '';
     edSave.textContent = note && !conv ? 'Update note' : 'Save note';
     ed.classList.add('open');
+    /* opened from a selection (`at` is its rect): just below it, or above when
+       below does not fit. Otherwise, and on narrow screens, the CSS docks it at
+       the bottom */
+    ed.style.top = ed.style.bottom = '';
+    if(at && window.innerWidth > 900){
+      var h = ed.offsetHeight, below = at.bottom + 10;
+      ed.style.top = Math.max(12, below + h + 12 <= window.innerHeight ? below : at.top - h - 10) + 'px';
+      ed.style.bottom = 'auto';
+    }
     setTimeout(function(){ edText.focus(); }, 50);
   }
   function closeEd(){
