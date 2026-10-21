@@ -156,9 +156,9 @@ the answer belonged in the document.
 | `new <name> [--title T]` | writes `<name>.src.html` starter; refuses to overwrite |
 | `build <name>.src.html [-o out.html] [--open]` | checks the source, writes `<name>.html`; preserves notes and the doc id in an existing output. Writes nothing if the check fails |
 | `md <doc.html> [-o out.md] [--force]` | the built document as markdown, best effort — see "Markdown out" |
-| `open <doc.html>` | opens the live page when the server can run, the file otherwise; records this session |
+| `open <doc.html>` | opens the live page when the server can run, the file otherwise; prints the page's address; records this session |
 | `wait <doc.html> [--timeout S]` | run in the background; exits when the reader sends or exports. Records this session, which keeps the server alive |
-| `status` | the server, the sessions keeping it alive, registered documents, whether the LaunchAgent is installed |
+| `status` | the server, the sessions keeping it alive, registered documents with their addresses, whether the LaunchAgent is installed |
 | `install` / `uninstall` | macOS LaunchAgent that starts the server for sandboxed Claude Code. The **user** runs it, once, in a normal Terminal |
 | `serve [--forever]` / `stop` | run the server in the foreground (debugging, or outside Claude Code); stop it |
 | `import <doc.html> <notes.json>` | merges by id; re-running is a no-op. The reader's `kind`, `tag`, `body`, `context` and `status` overwrite what is in the doc, and `status: deleted` removes the thread. Refuses notes exported from another document |
@@ -172,6 +172,22 @@ the answer belonged in the document.
 `reply --resolve` refuses for the same reason, and `reply` on a highlight refuses
 because there is no question in it. Every command exits non-zero with a one-line
 error on bad input.
+
+### The live page's address
+
+The server answers for a document at two addresses. Both serve the same page,
+with the same id, the same notes and the same live features:
+
+| Address | Example |
+|---|---|
+| by path | `http://127.0.0.1:47700/p/Users/me/repo/docs/plan.html` (or `/p/~/repo/docs/plan.html`) |
+| by id | `http://127.0.0.1:47700/d/<id>/` |
+
+- `open` and `build --open` print the path address. Give the user the address
+  they print, not one you built yourself.
+- The path address works for any reviewdoc build, registered or not, so the
+  user can open one by typing its path. Anything else is a plain 404.
+- Spaces in a path are `%20`. The browser does that when the user types a space.
 
 ## Source format
 

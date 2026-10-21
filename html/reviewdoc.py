@@ -856,17 +856,23 @@ CSS = r"""
     --bg:#0f1115; --card:#171a21; --card2:#1e222b; --ink:#e8eaed; --dim:#9aa3b2;
     --line:#2a2f3a; --accent:#5b9dff; --good:#3ecf8e; --warn:#f0b429; --bad:#ff5c5c;
     --you:#c77dff; --panw:392px;
+    /* text on an accent or good fill: dark on the bright dark-mode fills,
+       white on the deeper light-mode ones (4.5:1 or better either way) */
+    --on-accent:#0f1115; --hl:#ffd60a;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   @media (prefers-color-scheme: light){
     :root{ --bg:#f6f7f9; --card:#fff; --card2:#f0f2f5; --ink:#14171c; --dim:#5a6472;
-           --line:#e1e5ea; --accent:#1f6feb; --good:#12874f; --warn:#a86a00; --bad:#c92a2a;
-           --you:#7d2fd0; }
+           --line:#e1e5ea; --accent:#1a66d9; --good:#0f7a47; --warn:#946000; --bad:#c92a2a;
+           --you:#7d2fd0; --on-accent:#fff; --hl:#ffcc00; }
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  /* `font:… inherit` is invalid (inherit cannot sit inside the shorthand) and
+     drops the whole declaration, so controls name the family through --sans */
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 var(--sans);
     -webkit-font-smoothing:antialiased;padding:0 0 80px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .wrap{max-width:920px;margin:0 auto;padding:0 20px}
   header{padding:56px 0 32px;border-bottom:1px solid var(--line);margin-bottom:36px}
   h1{font-size:clamp(27px,5vw,40px);line-height:1.15;margin:0 0 12px;letter-spacing:-.02em}
@@ -925,7 +931,7 @@ CSS = r"""
   ol.steps>li{counter-increment:rd-step;position:relative;padding-left:40px;margin-bottom:16px;
     min-height:28px}
   ol.steps>li::before{content:counter(rd-step);position:absolute;left:0;top:1px;width:26px;
-    height:26px;border-radius:50%;background:var(--accent);color:#fff;display:grid;
+    height:26px;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;
     place-items:center;font-size:13px;font-weight:700;line-height:1}
   hr{border:none;border-top:1px solid var(--line);margin:48px 0}
   .analogy{color:var(--dim);font-style:italic;border-left:3px solid var(--accent);padding-left:14px;margin:16px 0}
@@ -933,7 +939,7 @@ CSS = r"""
 
   /* ---------- top toolbar ---------- */
   .rd-tools{display:flex;justify-content:flex-end;gap:8px;padding:16px 0 0;flex-wrap:wrap}
-  .rd-tools button{display:inline-flex;align-items:center;gap:7px;font:600 13px/1 inherit;
+  .rd-tools button{display:inline-flex;align-items:center;gap:7px;font:600 13px/1 var(--sans);
     background:var(--card);color:var(--dim);border:1px solid var(--line);border-radius:999px;
     padding:8px 14px;cursor:pointer}
   .rd-tools button:hover{color:var(--ink);border-color:var(--accent)}
@@ -957,6 +963,10 @@ CSS = r"""
   mark.rd-hl.mk{background:color-mix(in srgb,var(--warn) 34%,transparent);border-bottom:none}
   mark.rd-hl.mk:hover{background:color-mix(in srgb,var(--warn) 50%,transparent)}
   mark.rd-hl.mk.on{background:color-mix(in srgb,var(--warn) 68%,transparent)}
+  mark.rd-hl:focus-visible{outline-offset:1px}
+  /* the passage a note is being written for, while the editor is open */
+  mark.rd-hl.pend{background:color-mix(in srgb,var(--accent) 22%,transparent);
+    border-bottom:2px dashed var(--accent)}
   /* inline code and fenced blocks carry an opaque background of their own, which
      paints over the wash — drop it inside a mark so a highlight spanning
      `a_variable` is not a line with gaps punched in it */
@@ -968,90 +978,112 @@ CSS = r"""
   #rd-bar{position:absolute;z-index:60;display:none;transform:translate(-50%,-100%);
     gap:1px;background:var(--line);border-radius:9px;overflow:hidden;
     box-shadow:0 4px 16px rgba(0,0,0,.35)}
-  #rd-bar button{font:600 13px/1 inherit;background:var(--accent);color:#fff;border:none;
+  #rd-bar button{font:600 13px/1 var(--sans);background:var(--accent);color:var(--on-accent);border:none;
     padding:9px 13px;cursor:pointer}
   #rd-bar button:hover{filter:brightness(1.12)}
+  #rd-bar button:focus-visible{outline-offset:-4px;outline-color:var(--on-accent)}
+  /* Highlight is the marker pen: system yellow, dark text in either mode */
+  #rd-bar [data-hl]{background:var(--hl);color:#14171c}
+  #rd-bar [data-hl]:focus-visible{outline-color:#14171c}
   #rd-fab{position:fixed;right:18px;bottom:18px;z-index:55;display:none;align-items:center;gap:8px;
-    background:var(--accent);color:#fff;border:none;border-radius:999px;padding:13px 19px;cursor:pointer;
-    font:650 14px/1 inherit;box-shadow:0 6px 22px rgba(0,0,0,.35)}
-  #rd-fab .n{background:rgba(255,255,255,.28);border-radius:999px;padding:2px 8px;font-size:12px}
+    background:var(--accent);color:var(--on-accent);border:none;border-radius:999px;padding:13px 19px;cursor:pointer;
+    font:650 14px/1 var(--sans);box-shadow:0 6px 22px rgba(0,0,0,.35)}
+  #rd-fab .n{background:var(--on-accent);color:var(--accent);border-radius:999px;padding:2px 8px;font-size:12px}
+  /* a closed panel is also visibility:hidden, so it leaves the tab order and
+     stops painting its shadow over the page edge. Visibility flips at once on
+     the way in (so focus can land) and only after the slide on the way out */
   #rd-panel{position:fixed;top:0;right:0;bottom:0;width:var(--panw);z-index:70;
     background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;
-    transition:transform .22s ease}
+    transition:transform .22s ease,visibility 0s}
   #rd-panel header{padding:14px 16px;margin:0;border:none;border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:10px}
   #rd-panel header b{font-size:15px;flex:1}
   #rd-panel .rd-list{flex:1;overflow:auto;padding:12px 14px}
   #rd-panel .rd-foot{padding:12px 14px;border-top:1px solid var(--line);display:grid;gap:7px}
+  /* each button as wide as its label, so neither wraps onto two lines */
+  .rd-pair{display:flex;gap:7px}
+  .rd-pair>button{flex:1 1 auto;width:auto;white-space:nowrap}
   .rd-tabs{display:flex;gap:6px;padding:0 14px 8px}
-  .rd-tabs button{flex:1;font:600 12.5px/1 inherit;background:var(--card2);color:var(--dim);
+  .rd-tabs button{flex:1;font:600 13px/1 var(--sans);background:var(--card2);color:var(--dim);
     border:1px solid var(--line);border-radius:8px;padding:8px 6px;cursor:pointer;
     display:flex;align-items:center;justify-content:center;gap:6px}
-  .rd-tabs button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .rd-tabs .k{font-variant-numeric:tabular-nums;opacity:.75;font-size:11.5px}
-  .rd-only{display:flex;align-items:center;gap:7px;padding:0 15px 10px;
+  .rd-tabs button.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+  .rd-tabs .k{font-variant-numeric:tabular-nums;font-weight:500;font-size:12px}
+  .rd-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 14px 8px 15px}
+  .rd-only{display:flex;align-items:center;gap:7px;min-height:26px;
     font-size:12.5px;color:var(--dim);cursor:pointer;user-select:none}
-  .rd-only input{accent-color:var(--accent);margin:0;cursor:pointer}
+  .rd-only input{accent-color:var(--accent);margin:0;cursor:pointer;width:15px;height:15px}
+  .rd-gen{background:none;border:1px solid var(--line);border-radius:999px;color:var(--ink);
+    font:600 12.5px/1 var(--sans);padding:6px 11px;cursor:pointer}
+  .rd-gen:hover{border-color:var(--accent)}
   .rd-hlc{border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:11px;
     padding:10px 12px;margin-bottom:9px;background:var(--card2);cursor:pointer}
   .rd-hlc.sel{border-color:var(--accent)}
-  .rd-hlc.gone{opacity:.6;border-left-style:dashed}
-  .rd-hlc .sec{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
+  /* faded by colour, not opacity, so the text keeps its contrast */
+  .rd-hlc.gone{background:none;border-left-color:var(--line)}
+  .rd-hlc .sec{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
     margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
   .rd-hlc blockquote{margin:0;padding:0;border:none;font-size:13.5px;line-height:1.5;
     max-height:120px;overflow:hidden}
-  .rd-hlc .ctx{font-size:11.5px;color:var(--dim);font-style:italic;margin-top:7px}
+  .rd-hlc .ctx{font-size:12.5px;color:var(--dim);font-style:italic;margin-top:7px}
   .rd-x{background:none;border:1px solid var(--line);color:var(--dim);border-radius:8px;
     width:30px;height:30px;cursor:pointer;font-size:16px;line-height:1;flex:0 0 auto;display:none}
   .rd-hide{background:none;border:1px solid var(--line);color:var(--dim);border-radius:8px;
     width:30px;height:30px;cursor:pointer;font-size:15px;line-height:1;flex:0 0 auto}
   .rd-hide:hover{color:var(--ink);border-color:var(--accent)}
-  .rd-grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
+  .rd-grp{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
     font-weight:700;margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
   .rd-grp:first-child{margin-top:0}
   .rd-th{border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:10px;
     background:var(--card2);cursor:pointer}
   .rd-th.sel{border-color:var(--accent)}
-  .rd-th .sec{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
+  .rd-th .sec{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;
     margin-bottom:6px;display:flex;justify-content:space-between;gap:8px}
   .rd-th .tg{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
   .rd-chip{font-size:12px;font-weight:650;padding:2px 8px;border-radius:999px;
     background:var(--card);border:1px solid var(--line)}
+  /* Claude spoke last on an open thread: it is the reader's turn */
+  .rd-new{font-size:11.5px;font-weight:650;padding:2px 8px;border-radius:999px;color:var(--accent);
+    background:var(--card);border:1px solid color-mix(in srgb,var(--accent) 45%,transparent)}
   .rd-th blockquote{margin:0 0 9px;padding-left:10px;border-left:3px solid var(--accent);
     color:var(--dim);font-size:13px;font-style:italic;max-height:96px;overflow:hidden}
   .rd-msg{border-left:3px solid var(--you);padding:0 0 0 10px;margin:0 0 9px}
   .rd-msg.claude{border-left-color:var(--accent)}
-  .rd-msg .who{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  .rd-msg .who{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
     color:var(--you);margin-bottom:2px;display:flex;align-items:center;gap:8px}
   .rd-msg.claude .who{color:var(--accent)}
   .rd-msg .who .sp{flex:1}
-  .rd-msg .who button{background:none;border:none;padding:0;cursor:pointer;color:var(--dim);
-    font:700 10px/1 inherit;letter-spacing:.05em;text-transform:uppercase;text-decoration:underline}
+  /* small text links get their 24px hit area from padding that a negative
+     margin takes back, so the line they sit on does not grow */
+  .rd-msg .who button{background:none;border:none;padding:7px 4px;margin:-7px -4px;cursor:pointer;
+    color:var(--dim);font:700 11px/1 var(--sans);letter-spacing:.05em;text-transform:uppercase;
+    text-decoration:underline}
   .rd-msg .who button:hover{color:var(--ink)}
   .rd-msg .bd{font-size:14px;white-space:pre-wrap;line-height:1.55}
   .rd-msg .bd a{cursor:pointer}
-  .rd-draft{font-size:10px;font-weight:700;color:var(--warn);letter-spacing:.04em}
-  .rd-fold-btn{display:inline-flex;align-items:center;gap:5px;font:650 11.5px/1 inherit;
+  .rd-draft{font-size:11.5px;font-weight:700;color:var(--warn);letter-spacing:.04em}
+  .rd-fold-btn{display:inline-flex;align-items:center;gap:5px;font:650 12px/1 var(--sans);
     color:var(--accent);background:var(--card);border:1px solid var(--accent);
-    border-radius:999px;padding:4px 10px;cursor:pointer}
-  .rd-fold-btn:hover{background:var(--accent);color:#fff}
-  .rd-acts{display:flex;gap:8px;margin-top:8px}
-  .rd-acts button{background:none;border:none;color:var(--dim);cursor:pointer;font:600 12px/1 inherit;
-    padding:2px 0;text-decoration:underline}
+    border-radius:999px;padding:6px 11px;cursor:pointer}
+  .rd-fold-btn:hover{background:var(--accent);color:var(--on-accent)}
+  .rd-acts{display:flex;gap:12px;margin-top:4px}
+  .rd-acts button{background:none;border:none;color:var(--dim);cursor:pointer;font:600 12.5px/1 var(--sans);
+    padding:6px 2px;margin:0 -2px;text-decoration:underline}
+  .rd-acts button:hover{color:var(--ink)}
   .rd-rep{margin-top:8px;display:none}
   .rd-rep.open{display:block}
   .rd-rep textarea{width:100%;min-height:64px;background:var(--bg);color:var(--ink);
-    border:1px solid var(--line);border-radius:8px;padding:8px;font:14px/1.5 inherit;resize:vertical}
-  .rd-th.resolved{opacity:.55}
+    border:1px solid var(--line);border-radius:8px;padding:8px;font:14px/1.5 var(--sans);resize:vertical}
+  .rd-th.resolved{background:none;border-style:dashed}
   .rd-th.resolved.fold blockquote,.rd-th.resolved.fold .rd-msg,.rd-th.resolved.fold .rd-acts,
   .rd-th.resolved.fold .rd-rep{display:none}
-  .rd-st{font-size:10.5px;font-weight:700;color:var(--good);letter-spacing:.05em;
-    background:none;border:none;padding:0;cursor:pointer;font-family:inherit}
+  .rd-st{font-size:11.5px;font-weight:700;color:var(--good);letter-spacing:.05em;
+    background:none;border:none;padding:6px 4px;margin:-6px -4px;cursor:pointer;font-family:inherit}
   .rd-st:hover{text-decoration:underline}
   .rd-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-  .rd-tags button{font:600 12.5px/1 inherit;background:var(--card2);color:var(--ink);
+  .rd-tags button{font:600 12.5px/1 var(--sans);background:var(--card2);color:var(--ink);
     border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer}
-  .rd-tags button.sel{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .rd-tags button.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
   .rd-tags button:disabled{cursor:default;opacity:.8}
   #rd-ed{position:fixed;inset:auto 12px 12px 12px;max-width:520px;margin:0 auto;z-index:80;
     background:var(--card);border:1px solid var(--line);border-radius:15px;padding:16px;display:none;
@@ -1060,29 +1092,31 @@ CSS = r"""
   #rd-ed blockquote{margin:0 0 11px;padding-left:11px;border-left:3px solid var(--accent);
     color:var(--dim);font-size:13.5px;font-style:italic;max-height:78px;overflow:auto}
   #rd-ed textarea{width:100%;min-height:88px;background:var(--bg);color:var(--ink);
-    border:1px solid var(--line);border-radius:9px;padding:11px;font:15px/1.5 inherit;resize:vertical}
+    border:1px solid var(--line);border-radius:9px;padding:11px;font:15px/1.5 var(--sans);resize:vertical}
   #rd-ed .row{display:flex;gap:8px;margin-top:11px}
-  #rd-ed .row button{flex:1;font:650 14px/1 inherit;padding:12px;border-radius:9px;cursor:pointer;
+  #rd-ed .row button{flex:1;font:650 14px/1 var(--sans);padding:12px;border-radius:9px;cursor:pointer;
     border:1px solid var(--line)}
-  #rd-ed .row .ok{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #rd-ed .row .ok{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
   #rd-ed .row .no{background:var(--card2);color:var(--ink)}
-  .rd-big{font:650 14px/1 inherit;padding:13px;border-radius:10px;cursor:pointer;
-    background:var(--good);color:#fff;border:none;width:100%}
-  .rd-lite{font:600 13px/1 inherit;padding:11px;border-radius:10px;cursor:pointer;
+  #rd-ed .need{display:none;margin:8px 0 0;font-size:13px;color:var(--bad)}
+  #rd-ed .need.on{display:block}
+  .rd-big{font:650 14px/1 var(--sans);padding:13px;border-radius:10px;cursor:pointer;
+    background:var(--good);color:var(--on-accent);border:none;width:100%}
+  .rd-lite{font:600 13px/1 var(--sans);padding:11px;border-radius:10px;cursor:pointer;
     background:var(--card2);color:var(--ink);border:1px solid var(--line);width:100%}
-  .rd-live{font-size:12px;line-height:1.45;color:var(--dim);padding:0 15px 10px}
+  .rd-live{font-size:12.5px;line-height:1.45;color:var(--dim);padding:0 15px 10px}
   .rd-live .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
     vertical-align:1px;background:var(--dim)}
   .rd-live.ok .dot,.rd-live.saving .dot{background:var(--good)}
   .rd-live.down{color:var(--warn)} .rd-live.down .dot{background:var(--warn)}
   #rd-reload{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:95;display:flex;
     gap:12px;align-items:center;background:var(--card);border:1px solid var(--accent);
-    border-radius:11px;padding:10px 12px 10px 16px;font:600 14px/1.3 inherit;
+    border-radius:11px;padding:10px 12px 10px 16px;font:600 14px/1.3 var(--sans);
     box-shadow:0 6px 22px rgba(0,0,0,.35)}
-  #rd-reload button{font:650 13px/1 inherit;background:var(--accent);color:#fff;border:none;
+  #rd-reload button{font:650 13px/1 var(--sans);background:var(--accent);color:var(--on-accent);border:none;
     border-radius:8px;padding:8px 13px;cursor:pointer}
   #rd-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:90;
-    background:var(--good);color:#fff;padding:12px 20px;border-radius:10px;font:650 14px/1 inherit;
+    background:var(--good);color:var(--on-accent);padding:12px 20px;border-radius:10px;font:650 14px/1 var(--sans);
     display:none;box-shadow:0 6px 22px rgba(0,0,0,.35);text-align:center;max-width:88vw}
   #rd-help{position:fixed;inset:0;z-index:85;display:none;align-items:center;justify-content:center;
     padding:20px;background:rgba(0,0,0,.5)}
@@ -1094,22 +1128,30 @@ CSS = r"""
   #rd-help p,#rd-help li{font-size:14.5px;line-height:1.6}
   #rd-help ul{margin:0 0 14px}
   #rd-help .row{display:flex;justify-content:flex-end;margin-top:6px}
-  #rd-help .row button{font:650 14px/1 inherit;padding:11px 20px;border-radius:9px;cursor:pointer;
-    background:var(--accent);color:#fff;border:none}
+  #rd-help .row button{font:650 14px/1 var(--sans);padding:11px 20px;border-radius:9px;cursor:pointer;
+    background:var(--accent);color:var(--on-accent);border:none}
+  /* read out by screen readers, never drawn */
+  .rd-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   @media(min-width:901px){
     body{padding-right:var(--panw);transition:padding-right .22s ease}
     /* panel collapsed: drop the gutter so .wrap centres on the full viewport */
     body.rd-nopanel{padding-right:0}
-    body.rd-nopanel #rd-panel{transform:translateX(101%)}
+    body.rd-nopanel #rd-panel{transform:translateX(101%);visibility:hidden;
+      transition:transform .22s ease,visibility 0s .22s}
     body.rd-nopanel #rd-fab{display:flex}
+    /* the editor centres on the text column, not under the panel */
+    body:not(.rd-nopanel) #rd-ed{right:calc(var(--panw) + 12px)}
   }
   @media(max-width:900px){
-    #rd-panel{width:min(400px,100%);transform:translateX(101%);
-      box-shadow:-8px 0 30px rgba(0,0,0,.3)}
-    #rd-panel.open{transform:none}
+    #rd-panel{width:min(400px,100%);transform:translateX(101%);visibility:hidden;
+      box-shadow:-8px 0 30px rgba(0,0,0,.3);transition:transform .22s ease,visibility 0s .22s}
+    #rd-panel.open{transform:none;visibility:visible;transition:transform .22s ease,visibility 0s}
     #rd-fab{display:flex}
     .rd-x{display:block}
     .rd-hide{display:none}
+  }
+  @media(prefers-reduced-motion:reduce){
+    *,*::before,*::after{transition-duration:0s!important;scroll-behavior:auto!important}
   }
   @media print{
     #rd-fab,#rd-panel,#rd-bar,#rd-ed,#rd-toast,#rd-help,#rd-reload,.rd-tools{display:none!important}
@@ -1180,7 +1222,9 @@ JS = r"""
       edQuote = ed.querySelector('blockquote'),
       edText = ed.querySelector('textarea'),
       edSave = ed.querySelector('[data-save]'),
-      toastEl = document.getElementById('rd-toast');
+      edNeed = ed.querySelector('.need'),
+      toastEl = document.getElementById('rd-toast'),
+      sayEl = document.getElementById('rd-say');
 
   var pending = null, editing = null, pendTag = 'question', tab = 'notes', openOnly = false;
 
@@ -1211,8 +1255,14 @@ JS = r"""
   function label(k){ return LABELS[k] || TAGS[k] || k; }
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-  function toast(m){ toastEl.textContent = m; toastEl.style.display = 'block';
+  function toast(m){ toastEl.textContent = m; toastEl.style.display = 'block'; say(m);
     clearTimeout(toast._t); toast._t = setTimeout(function(){ toastEl.style.display='none'; }, 2800); }
+  /* the toast is drawn; this is what a screen reader hears. Emptied first so
+     the same message twice in a row is still read out */
+  function say(m){ sayEl.textContent = ''; setTimeout(function(){ sayEl.textContent = m; }, 40); }
+  function motion(){
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  }
 
   /* ---------- anchoring (char offsets over a section's text nodes) ---------- */
   var sections = [].slice.call(document.querySelectorAll('section.rd-sec'));
@@ -1277,6 +1327,8 @@ JS = r"""
     for(i = hits.length - 1; i >= 0; i--){
       var r = document.createRange(), m = document.createElement('mark');
       m.className = cls; m.dataset.noteId = id;
+      /* one tab stop per note, on its first piece; Enter opens the thread */
+      if(i === 0) m.tabIndex = 0;
       try{
         r.setStart(hits[i][0], hits[i][1]); r.setEnd(hits[i][0], hits[i][2]);
         r.surroundContents(m);
@@ -1351,10 +1403,14 @@ JS = r"""
     var d = document.createElement('article');
     d.className = 'rd-th' + (t.status === 'resolved' ? ' resolved fold' : '');
     d.dataset.id = t.id;
+    d.tabIndex = 0;
+    var last = t.replies[t.replies.length - 1];
     var h = '<div class="sec"><span>' + esc(t.sectionTitle || 'General') + '</span>' +
             (t.status === 'resolved' ? '<button type="button" class="rd-st" data-status ' +
                'title="Reopen this thread">✓ resolved</button>' : '') + '</div>';
     h += '<div class="tg"><span class="rd-chip">' + esc(label(t.tag)) + '</span>' +
+         (t.status !== 'resolved' && last && last.author === 'claude'
+            ? '<span class="rd-new">Claude replied</span>' : '') +
          (t._draft || t._patched ? '<span class="rd-draft">not exported</span>' : '') +
          (t.status === 'resolved' ? '<button type="button" class="rd-fold-btn" data-fold>' +
             foldTxt(true, t.replies.length) + '</button>' : '') + '</div>';
@@ -1368,9 +1424,10 @@ JS = r"""
          '<button type="button" data-status>' +
            (t.status === 'resolved' ? 'Reopen' : 'Mark resolved') + '</button>' +
          (t._draft ? '<button type="button" data-del>Delete</button>' : '') + '</div>';
-    h += '<div class="rd-rep"><textarea placeholder="Reply to this thread…"></textarea>' +
+    h += '<div class="rd-rep"><textarea aria-label="Reply" placeholder="Reply to this thread…"></textarea>' +
          '<button class="rd-lite" type="button" data-send style="margin-top:6px">Save reply</button></div>';
     d.innerHTML = h;
+    onEnter(d, function(){ jump(t.id, true); });
 
     d.addEventListener('click', function(e){
       var el = e.target;
@@ -1459,7 +1516,7 @@ JS = r"""
     var sec = a.dataset.sec ? document.getElementById(a.dataset.sec) : secByNum(a.dataset.num);
     if(!sec){ toast('That section is not in this document'); return; }
     if(window.matchMedia('(max-width:900px)').matches) panel.classList.remove('open');
-    sec.scrollIntoView({behavior:'smooth', block:'start'});
+    sec.scrollIntoView({behavior:motion(), block:'start'});
     sec.classList.add('rd-flash');
     setTimeout(function(){ sec.classList.remove('rd-flash'); }, 1500);
   }
@@ -1494,6 +1551,7 @@ JS = r"""
     var d = document.createElement('article');
     d.className = 'rd-hlc' + (t._anchored ? '' : ' gone');
     d.dataset.id = t.id;
+    d.tabIndex = 0;
     var h = '<div class="sec"><span>' + esc(t.sectionTitle || 'General') + '</span>' +
             (t._draft || t._patched ? '<span class="rd-draft">not exported</span>' : '') + '</div>';
     h += '<blockquote>' + esc(t.quote) + '</blockquote>';
@@ -1503,6 +1561,7 @@ JS = r"""
     h += '<div class="rd-acts"><button type="button" data-note>Add a note</button>' +
          '<button type="button" data-del>Delete</button></div>';
     d.innerHTML = h;
+    onEnter(d, function(){ jump(t.id, true); });
     d.addEventListener('click', function(e){
       var el = e.target;
       if(el.hasAttribute && el.hasAttribute('data-note')){
@@ -1526,17 +1585,19 @@ JS = r"""
   function syncTabs(){
     [].forEach.call(panel.querySelectorAll('.rd-tabs button'), function(b){
       b.classList.toggle('sel', b.dataset.tab === tab);
+      b.setAttribute('aria-pressed', b.dataset.tab === tab ? 'true' : 'false');
     });
-    onlyBox.parentNode.style.display = tab === 'notes' ? 'flex' : 'none';
+    onlyBox.closest('.rd-row').style.display = tab === 'notes' ? 'flex' : 'none';
   }
 
   function render(){
     var all = threads().filter(function(t){ return t.status !== 'deleted'; }),
         notes = all.filter(function(t){ return t.kind !== 'highlight'; }),
-        hls = all.filter(function(t){ return t.kind === 'highlight'; });
-    fab.querySelector('.n').textContent =
-      notes.filter(function(t){ return t.status !== 'resolved'; }).length;
-    count('notes', notes.length); count('hl', hls.length);
+        hls = all.filter(function(t){ return t.kind === 'highlight'; }),
+        open = notes.filter(function(t){ return t.status !== 'resolved'; }).length;
+    /* the tab and the floating button count the same thing: threads still open */
+    fab.querySelector('.n').textContent = open;
+    count('notes', open); count('hl', hls.length);
     list.innerHTML = '';
     /* highlights read as a map of the document, so they stay in document order.
        notes are a work queue: newest activity on top, no section grouping. */
@@ -1578,17 +1639,26 @@ JS = r"""
     delete drafts.patch[id];
     saveDrafts(); unmark(id); render();
   }
-  function jump(id){
+  /* Enter or Space on the element itself, not on a button inside it */
+  function onEnter(el, fn){
+    el.addEventListener('keydown', function(e){
+      if(e.target === el && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); fn(); }
+    });
+  }
+  function jump(id, focusMark){
     var ms = document.querySelectorAll('mark.rd-hl[data-note-id="' + id + '"]');
     if(!ms.length){ toast('This note is no longer anchored to any text'); return; }
-    if(window.matchMedia('(max-width:900px)').matches) panel.classList.remove('open');
-    ms[0].scrollIntoView({behavior:'smooth', block:'center'});
+    var narrow = window.matchMedia('(max-width:900px)').matches;
+    if(narrow) panel.classList.remove('open');
+    ms[0].scrollIntoView({behavior:motion(), block:'center'});
+    /* a panel that just closed would leave focus nowhere */
+    if(focusMark || narrow) ms[0].focus({preventScroll:true});
     for(var i=0;i<ms.length;i++) ms[i].classList.add('on');
     setTimeout(function(){
       for(var j=0;j<ms.length;j++) ms[j].classList.remove('on');
     }, 1900);
   }
-  function focusThread(id){
+  function focusThread(id, moveFocus){
     if(collapsed()) collapse(false);
     var sel = '[data-id="' + id + '"]', c = list.querySelector(sel);
     if(!c){
@@ -1603,12 +1673,14 @@ JS = r"""
     if(!c) return;
     panel.classList.add('open');
     c.scrollIntoView({block:'center'});
+    if(moveFocus) c.focus({preventScroll:true});
     c.classList.add('sel');
     setTimeout(function(){ c.classList.remove('sel'); }, 1900);
   }
 
   /* ---------- selection -> highlight or note ---------- */
   function hideBar(){ bar.style.display = 'none'; }
+  function barUp(){ return bar.style.display === 'flex'; }
   function onSel(){
     if(ed.classList.contains('open')) return;
     var s = window.getSelection();
@@ -1622,8 +1694,17 @@ JS = r"""
     bar.style.left = (b.left + b.width/2 + window.scrollX) + 'px';
     bar.style.top = (b.top + window.scrollY - 9) + 'px';
   }
-  document.addEventListener('mouseup', function(){ setTimeout(onSel, 10); });
-  document.addEventListener('touchend', function(){ setTimeout(onSel, 10); });
+  /* a mouse or finger selection is finished on release; a keyboard one
+     (Shift+arrows) has no release, so it is caught once it stops changing */
+  var pressing = false, selTimer = null;
+  document.addEventListener('mousedown', function(){ pressing = true; });
+  document.addEventListener('touchstart', function(){ pressing = true; }, {passive:true});
+  document.addEventListener('mouseup', function(){ pressing = false; setTimeout(onSel, 10); });
+  document.addEventListener('touchend', function(){ pressing = false; setTimeout(onSel, 10); });
+  document.addEventListener('selectionchange', function(){
+    if(pressing) return;
+    clearTimeout(selTimer); selTimer = setTimeout(onSel, 200);
+  });
   document.addEventListener('scroll', hideBar, {passive:true});
 
   /* everything both buttons need: the text, where it sits, and enough context to
@@ -1655,7 +1736,18 @@ JS = r"""
     if(!pending) return;
     openEd(pending.quote);
     clearSel();
+    showPend();
   });
+  /* the selection is gone once the editor opens, so mark where the note will
+     land until it is saved or cancelled */
+  var PEND = 'rd-pending';
+  function showPend(){
+    if(!pending || pending.start == null) return;
+    anchor({id:PEND, quote:pending.quote, sectionId:pending.sectionId, start:pending.start});
+    [].forEach.call(document.querySelectorAll('mark.rd-hl[data-note-id="' + PEND + '"]'), function(m){
+      m.classList.add('pend'); m.removeAttribute('tabindex');
+    });
+  }
   /* one-click filings: no modal, no typing — the quoted text is the whole point */
   function quick(kind, tag, done){
     var p = capture();
@@ -1681,14 +1773,23 @@ JS = r"""
     agree: 'Optional — saving files this as agreed and already closed.',
     defer: 'Optional — say what should happen; Claude opens a backlog issue for it.'
   };
+  var MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent),
+      edReturn = null;
+  edSave.setAttribute('aria-keyshortcuts', MAC ? 'Meta+Enter' : 'Control+Enter');
   Object.keys(TAGS).forEach(function(k){
     var b = document.createElement('button');
     b.type = 'button'; b.textContent = TAGS[k]; b.dataset.k = k;
     b.addEventListener('click', function(){ selTag(k); });
     edTags.appendChild(b);
   });
+  function need(msg){
+    edNeed.textContent = msg || '';
+    edNeed.classList.toggle('on', !!msg);
+  }
+  edText.addEventListener('input', function(){ if(edText.value.trim()) need(''); });
   function selTag(k){
     pendTag = k;
+    need('');
     var extra = edTags.querySelector('[data-extra]');
     if(extra) edTags.removeChild(extra);
     if(!TAGS[k]){
@@ -1702,11 +1803,13 @@ JS = r"""
     }
     [].forEach.call(edTags.querySelectorAll('button'), function(x){
       x.classList.toggle('sel', x.dataset.k === k);
+      x.setAttribute('aria-pressed', x.dataset.k === k ? 'true' : 'false');
     });
     edText.setAttribute('placeholder', NO_BODY_HINT[k] || PLACEHOLDER);
   }
   function openEd(quote, note){
     editing = note || null;
+    edReturn = document.activeElement;
     var conv = !!note && note.kind === 'highlight';   /* highlight -> note */
     /* keep whatever tag the note already has, even one the picker does not offer,
        so editing the body of a Clarify note never silently re-tags it */
@@ -1718,11 +1821,22 @@ JS = r"""
     ed.classList.add('open');
     setTimeout(function(){ edText.focus(); }, 50);
   }
-  function closeEd(){ ed.classList.remove('open'); pending = null; editing = null; }
+  function closeEd(){
+    unmark(PEND);
+    ed.classList.remove('open'); pending = null; editing = null; need('');
+    /* back to whatever opened the editor, if it is still on screen */
+    var r = edReturn; edReturn = null;
+    if(r && r !== document.body && r.isConnected && r.offsetParent !== null)
+      r.focus({preventScroll:true});
+  }
   ed.querySelector('[data-cancel]').addEventListener('click', closeEd);
   edSave.addEventListener('click', function(){
     var body = edText.value.trim();
-    if(!body && NO_BODY_TAGS.indexOf(pendTag) < 0){ edText.focus(); return; }
+    if(!body && NO_BODY_TAGS.indexOf(pendTag) < 0){
+      need('Add a few words first — or pick ' + label('agree') + ' or ' + label('defer') +
+           ', which can be saved empty.');
+      edText.focus(); return;
+    }
     if(editing){
       var id = editing.id, was = editing.kind, p = {tag:pendTag, body:body};
       /* re-tagging to agree closes the thread, exactly as filing it that way
@@ -1746,8 +1860,13 @@ JS = r"""
               ts:new Date().toISOString(), replies:[],
               status: closes ? 'resolved' : 'open', anchored:true };
     drafts.notes.push(n); saveDrafts();
+    unmark(PEND);
     anchor(n);
     closeEd(); setTab('notes'); render();
+    /* keyboard flow: land on the passage just annotated, Tab carries on from there */
+    var nm = document.querySelector('mark.rd-hl[data-note-id="' + n.id + '"]');
+    if(nm && (!document.activeElement || document.activeElement === document.body))
+      nm.focus({preventScroll:true});
     toast(closes ? 'Filed as agreed and closed — export when you are done'
                  : 'Note saved — export when you are done');
   });
@@ -1757,7 +1876,22 @@ JS = r"""
 
   document.addEventListener('click', function(e){
     var m = e.target.closest && e.target.closest('mark.rd-hl');
-    if(m) focusThread(m.dataset.noteId);
+    if(m && m.dataset.noteId !== PEND) focusThread(m.dataset.noteId);
+  });
+  function inField(el){
+    return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+  }
+  var BAR_KEYS = {h:'[data-hl]', c:'[data-clarify]', n:'[data-note]'};
+  document.addEventListener('keydown', function(e){
+    /* Enter on a marked passage opens its thread and puts focus there */
+    var m = e.target.closest && e.target.closest('mark.rd-hl');
+    if(m && m.dataset.noteId !== PEND && (e.key === 'Enter' || e.key === ' ')){
+      e.preventDefault(); focusThread(m.dataset.noteId, true); return;
+    }
+    /* H / C / N act on a selection the bar is showing for, like its buttons */
+    if(!barUp() || helpOpen() || e.metaKey || e.ctrlKey || e.altKey || inField(e.target)) return;
+    var b = BAR_KEYS[(e.key || '').toLowerCase()];
+    if(b){ e.preventDefault(); bar.querySelector(b).click(); }
   });
   /* ---------- top toolbar: how-to, markdown, full screen ---------- */
   /* build renders the markdown once, in Python, and embeds it: one converter,
@@ -1778,12 +1912,27 @@ JS = r"""
       root = document.documentElement,
       reqFs = root.requestFullscreen || root.webkitRequestFullscreen;
 
-  function showHelp(on){ if(help) help.classList.toggle('open', !!on); }
+  var helpReturn = null;
+  function helpOpen(){ return !!help && help.classList.contains('open'); }
+  /* a modal: focus goes in on open, stays in, and comes back on close */
+  function showHelp(on){
+    if(!help) return;
+    help.classList.toggle('open', !!on);
+    if(on){
+      helpReturn = document.activeElement;
+      help.querySelector('[data-help-close]').focus();
+    } else if(helpReturn && helpReturn.isConnected){
+      helpReturn.focus({preventScroll:true}); helpReturn = null;
+    }
+  }
   if(howBtn) howBtn.addEventListener('click', function(){ showHelp(true); });
   if(help) help.addEventListener('click', function(e){
     /* the backdrop is the overlay itself; anything inside .box keeps it open */
     if(e.target === help || (e.target.closest && e.target.closest('[data-help-close]')))
       showHelp(false);
+  });
+  if(help) help.addEventListener('keydown', function(e){
+    if(e.key === 'Tab'){ e.preventDefault(); help.querySelector('[data-help-close]').focus(); }
   });
 
   /* Safari still only has the webkit-prefixed half of the Fullscreen API */
@@ -1821,23 +1970,32 @@ JS = r"""
   if(ui.c) document.body.classList.add('rd-nopanel');
   openOnly = !!ui.o;                                  /* the tab itself never persists:
                                                          always land on Notes after a rebuild */
-  panel.querySelector('[data-collapse]').addEventListener('click', function(){ collapse(true); });
+  panel.querySelector('[data-collapse]').addEventListener('click', function(){
+    collapse(true); fab.focus();
+  });
 
-  fab.addEventListener('click', function(){
-    if(wide() && collapsed()){ collapse(false); return; }
-    panel.classList.toggle('open');
-  });
-  panel.querySelector('[data-close]').addEventListener('click', function(){
+  /* closing the panel must not strand focus inside it once it is hidden */
+  function closePanel(){
+    var inside = panel.contains(document.activeElement);
     panel.classList.remove('open');
+    if(inside && !wide()) fab.focus();
+  }
+  fab.addEventListener('click', function(){
+    if(wide() && collapsed()) collapse(false);
+    else if(panel.classList.contains('open')) return closePanel();
+    else panel.classList.add('open');
+    panel.querySelector('.rd-tabs .sel').focus();
   });
+  panel.querySelector('[data-close]').addEventListener('click', closePanel);
   panel.querySelector('[data-general]').addEventListener('click', function(){
     pending = null; openEd('');
   });
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape') return;
-    if(help && help.classList.contains('open')) showHelp(false);
+    if(helpOpen()) showHelp(false);
     else if(ed.classList.contains('open')) closeEd();
-    else panel.classList.remove('open');
+    else if(barUp()) hideBar();
+    else if(panel.classList.contains('open')) closePanel();
   });
   [].forEach.call(panel.querySelectorAll('.rd-tabs button'), function(b){
     b.addEventListener('click', function(){ setTab(b.dataset.tab); render(); });
@@ -1970,7 +2128,18 @@ JS = r"""
       syncTimer = null, inflight = null, again = false,
       statusEl = panel.querySelector('[data-live]'),
       sendBtn = panel.querySelector('[data-send-claude]'),
-      exportBtn = panel.querySelector('[data-export]');
+      goLiveBtn = panel.querySelector('[data-golive]'),
+      exportBtn = panel.querySelector('[data-export]'),
+      lastStatus = null;
+
+  /* another button owns the green slot: Export steps down beside Copy */
+  function demoteExport(){
+    exportBtn.className = 'rd-lite';
+    exportBtn.textContent = 'Export JSON';
+    exportBtn.title = 'Save your notes as a JSON file';
+    var pair = panel.querySelector('.rd-pair');
+    pair.insertBefore(exportBtn, pair.firstChild);
+  }
 
   function hasDrafts(){
     return !!(drafts.notes.length || drafts.replies.length || Object.keys(drafts.patch).length);
@@ -2049,6 +2218,10 @@ JS = r"""
     else t = on + 'Live · saved to the file' + (waiting ? ' · <b>Claude is waiting</b>' : '');
     statusEl.innerHTML = t;
     statusEl.className = 'rd-live ' + kind;
+    /* read out only when the connection drops or comes back, not every poll */
+    if(lastStatus && kind !== lastStatus && (kind === 'down' || lastStatus === 'down') &&
+       kind !== 'saving') say(statusEl.textContent);
+    lastStatus = kind;
   }
   function showReload(){
     if(document.getElementById('rd-reload')) return;
@@ -2059,6 +2232,7 @@ JS = r"""
       sync().then(function(){ location.reload(); });
     });
     document.body.appendChild(b);
+    say('Claude rebuilt this page. Reload to see the new version.');
   }
   if(sendBtn) sendBtn.addEventListener('click', function(){
     sync().then(function(ok){
@@ -2119,15 +2293,27 @@ JS = r"""
       img.src = 'http://127.0.0.1:' + p + '/probe/' + DOC.id + '.gif?' + Date.now();
     })();
   }
+  /* the better path gets the green button: the live copy saves as you type */
   function offerLive(p){
     var url = 'http://127.0.0.1:' + p + '/d/' + DOC.id + '/';
     statusEl.innerHTML = '<span class="dot"></span>A live session is running for this page. ' +
-      '<a href="' + url + '" data-golive>Open it live</a>' +
-      (hasDrafts() ? ', your unsent notes come along.' : '.');
+      'Anything not yet exported comes along.';
     statusEl.className = 'rd-live ok';
-    statusEl.querySelector('[data-golive]').addEventListener('click', function(e){
-      e.preventDefault();
-      location.href = url + (hasDrafts() ? '#rd-drafts=' + b64(JSON.stringify(drafts)) : '');
+    if(goLiveBtn.hidden){
+      goLiveBtn.hidden = false;
+      demoteExport();
+      helpModes(['offline', 'live']);
+      goLiveBtn.addEventListener('click', function(){
+        location.href = url + (hasDrafts() ? '#rd-drafts=' + b64(JSON.stringify(drafts)) : '');
+      });
+      say('A live session is running for this page. Open it live from the panel.');
+    }
+  }
+  /* the how-to explains the mode the reader is actually in */
+  function helpModes(modes){
+    if(!help) return;
+    [].forEach.call(help.querySelectorAll('[data-mode]'), function(el){
+      el.hidden = modes.indexOf(el.dataset.mode) < 0;
     });
   }
 
@@ -2138,11 +2324,12 @@ JS = r"""
   render();
   if(LIVE){
     sendBtn.hidden = false;
-    exportBtn.className = 'rd-lite';
-    exportBtn.innerHTML = 'Export notes as JSON';
+    demoteExport();
+    helpModes(['live']);
     setStatus('ok');
     poll();
   } else {
+    helpModes(['offline']);
     setStatus('offline');
     if(location.protocol === 'file:' && (DOC.ports || []).length) probe();
   }
@@ -2150,41 +2337,46 @@ JS = r"""
 """
 
 PANEL = """
-<div id="rd-bar">
-  <button type="button" data-hl>&#128396; Highlight</button>
-  <button type="button" data-clarify>&#128269; Clarify</button>
-  <button type="button" data-note>&#128172; Note</button>
+<div id="rd-bar" role="toolbar" aria-label="Mark up the selection">
+  <button type="button" data-hl aria-keyshortcuts="H">&#128396; Highlight</button>
+  <button type="button" data-clarify aria-keyshortcuts="C">&#128269; Clarify</button>
+  <button type="button" data-note aria-keyshortcuts="N">&#128172; Note</button>
 </div>
 
-<button id="rd-fab" type="button">&#128221; Review <span class="n">0</span></button>
+<button id="rd-fab" type="button" aria-controls="rd-panel">&#128221; Review <span class="n">0</span></button>
 
 <aside id="rd-panel" aria-label="Review comments">
   <header><b>Review</b>
-    <button class="rd-hide" type="button" data-collapse title="Hide panel &mdash; centre the document">&#8677;</button>
-    <button class="rd-x" type="button" data-close>&#10005;</button></header>
-  <div class="rd-tabs">
-    <button type="button" data-tab="notes">Notes <span class="k">0</span></button>
-    <button type="button" data-tab="hl">Highlights <span class="k">0</span></button>
+    <button class="rd-hide" type="button" data-collapse aria-label="Hide the panel" title="Hide panel &mdash; centre the document">&#8677;</button>
+    <button class="rd-x" type="button" data-close aria-label="Close the panel">&#10005;</button></header>
+  <div class="rd-tabs" role="group" aria-label="Show">
+    <button type="button" data-tab="notes" aria-pressed="true">Notes <span class="k">0</span></button>
+    <button type="button" data-tab="hl" aria-pressed="false">Highlights <span class="k">0</span></button>
   </div>
   <div class="rd-live" data-live></div>
-  <label class="rd-only"><input type="checkbox" data-openonly> Show open only</label>
+  <div class="rd-row">
+    <label class="rd-only"><input type="checkbox" data-openonly> Show open only</label>
+    <button class="rd-gen" type="button" data-general title="A note about the whole document, not tied to any text">+ General note</button>
+  </div>
   <div class="rd-list"></div>
   <div class="rd-foot">
+    <button class="rd-big" type="button" data-golive hidden>&#10148; Open it live</button>
     <button class="rd-big" type="button" data-send-claude hidden>&#10148; Send to Claude</button>
     <button class="rd-big" type="button" data-export>&#10003; Export notes for Claude</button>
-    <button class="rd-lite" type="button" data-copy>Copy notes as markdown</button>
-    <button class="rd-lite" type="button" data-general>+ Note not tied to any text</button>
+    <div class="rd-pair"><button class="rd-lite" type="button" data-copy>Copy notes as markdown</button></div>
   </div>
 </aside>
 
 <div id="rd-ed" role="dialog" aria-label="Add a note">
-  <div class="rd-tags"></div>
+  <div class="rd-tags" role="group" aria-label="Kind of note"></div>
   <blockquote></blockquote>
-  <textarea placeholder="What's on your mind? Questions and half-formed doubts are exactly what's useful here."></textarea>
+  <textarea aria-label="Note" aria-describedby="rd-need" placeholder="What's on your mind? Questions and half-formed doubts are exactly what's useful here."></textarea>
+  <p class="need" id="rd-need" role="alert"></p>
   <div class="row"><button class="no" type="button" data-cancel>Cancel</button><button class="ok" type="button" data-save>Save note</button></div>
 </div>
 
 <div id="rd-toast"></div>
+<div id="rd-say" class="rd-sr" role="status" aria-live="polite"></div>
 """
 
 HELP = """
@@ -2200,14 +2392,17 @@ HELP = """
           <b>defer to backlog</b> (Claude opens an issue for it), or a plain <b>agree</b>, which
           files itself closed and needs no typing.</li>
     </ul>
-    <p>The review panel keeps notes and highlights in separate tabs, newest first. You can edit or
+    <p>From the keyboard: select with <kbd>Shift</kbd> and the arrow keys, then press
+    <kbd>H</kbd>, <kbd>C</kbd> or <kbd>N</kbd>. <kbd>Tab</kbd> reaches every marked passage and
+    <kbd>Enter</kbd> opens its thread; <kbd>&#8984;</kbd><kbd>&#8617;</kbd> saves a note.</p>
+    <p>The review panel keeps notes and highlights in separate tabs. You can edit or
     delete your own, and mark a thread resolved &mdash; closing a thread is yours to decide, never
-    Claude's.</p>
-    <p><b>Live</b> (the panel says so): every note is saved to the file as you write it, Claude's
+    Claude's. <b>Claude replied</b> on a thread means it is your turn: reply, or mark it resolved.</p>
+    <p data-mode="live"><b>Live</b> (the panel says so): every note is saved to the file as you write it, Claude's
     replies appear without a reload, and <b>&#10148; Send to Claude</b> tells the waiting session
     you are done. If Claude Code stops, keep going: notes wait in this browser and are saved once it
     is back.</p>
-    <p><b>Offline copy</b> (the file opened on its own): everything stays in this browser until you
+    <p data-mode="offline"><b>Offline copy</b> (the file opened on its own): everything stays in this browser until you
     press <b>&#10003; Export notes for Claude</b>, which saves a JSON file. Tell Claude when you're
     done and it will read your notes, reply in the panel, and rebuild the page.</p>
     <p class="small">&#8677; in the panel header hides the panel and centres the text.

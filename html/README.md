@@ -47,21 +47,46 @@ and the page's **↓ Markdown** button hands the reader the same text.
 
 The same file works two ways.
 
-**Live.** A small server (`live.py`, stdlib only) serves the page from
-`http://127.0.0.1:<port>/d/<doc id>/`. Every note goes into the HTML file on disk as
-you write it, so there is no Export. Claude's replies appear in the open page within
-seconds, so there is no reload. **Send to Claude** wakes the Claude session that is
-waiting on the page. The panel's status line says which mode you are in.
+**Live.** A small server (`live.py`, stdlib only) serves the page on
+`http://127.0.0.1:<port>/`, by path or by id (see "Addresses"). Every note goes into
+the HTML file on disk as you write it, so there is no Export. Claude's replies appear
+in the open page within seconds, so there is no reload. **Send to Claude** wakes the
+Claude session that is waiting on the page. The panel's status line says which mode
+you are in.
 
 **Offline.** The file opened on its own, from disk or an email. Notes stay in the
 browser until you press **Export notes for Claude**, which saves a JSON file; Claude
 reads it from beside the document or from `~/Downloads`. If a live server is running,
-the offline copy notices and offers **Open it live**, carrying your unsent notes
-across in the link.
+the offline copy notices and turns its main button into **Open it live**, carrying
+your unsent notes across in the link; Export moves to the smaller row beneath it.
 
 A live page whose server stops (Claude Code quit) says so and keeps working: notes
 wait in the browser and are written to the file as soon as the server is back. The
 port is stable, so the browser finds those notes again.
+
+### Addresses
+
+Each document has two addresses on the server. Both serve the same page, with the
+same id, the same notes and the same live features. Drafts are kept per id, so they
+follow the document whichever address you use.
+
+| | |
+|---|---|
+| `/p/Users/me/repo/docs/plan.html` | by absolute path. `/p/~/repo/docs/plan.html` works too |
+| `/d/<doc id>/` | by id, as before |
+
+- A path finds any reviewdoc build, registered or not. A build the server has not
+  seen yet is registered on the spot, as `open` would do.
+- Type spaces as they are; the browser sends them as `%20`.
+- `open`, `build --open` and `wait` print the path address. `status` lists each
+  document's address.
+- There is no address by file name alone. Two folders often hold files with the
+  same name, and a name that pointed at one document today could point at another
+  tomorrow. A path names exactly one file.
+- A copy of a built document carries the same id. The server keeps one file per id,
+  so asking for the copy by path shows a page that points at the original.
+- A server started before addresses existed knows only `/d/`. The CLI reads the
+  running server's version and prints `/d/` addresses to it until it restarts.
 
 ### When the server runs
 
@@ -110,13 +135,24 @@ so the live page opens in your local browser.
 
 - It listens on `127.0.0.1` only, on the first free port from 47700 (`REVIEWDOC_PORT`
   moves the range).
-- It serves only documents a `build` has registered, by their random id.
+- It serves only reviewdoc builds. By id, that means documents a `build` or `open`
+  registered. By path, it means a file that carries a build's markers: the doctype
+  first, the document id in the head, and the notes block. The file must end in
+  `.html` and belong to you. Symlinks and `..` are resolved before any check.
+- Everything else under `/p/` gets the same plain 404, whatever the reason. So the
+  server cannot be used to learn whether a file exists.
 - Requests whose `Host` is not `127.0.0.1`/`localhost` are refused (DNS rebinding).
+- A page the server serves carries the API token, so only builds you trust should be
+  served. That is why another website cannot register one for you. It may link to
+  a document that is already registered, as it always could with `/d/`. It cannot
+  embed one (`<img>`, `<script>`, `fetch`). The browser's `Sec-Fetch-Site` header
+  tells the server who asked. A build the server has not seen opens only from an
+  address you typed or pasted, or from a link on one of its own pages.
 - Every API call needs a per-user token, kept `0600` in the state directory. Only the
   pages the server serves carry it, and it rides in a custom header, which another
   site's script cannot send without a CORS preflight the server never grants.
-- Any other local user who knows a document's id could open that page. On a
-  single-user Mac this does not matter.
+- Any other local user can reach the server too. They could open any build of yours
+  by its path. On a single-user Mac this does not matter.
 
 ## Sharing it with others
 
@@ -148,7 +184,7 @@ home. A marketplace of your own on GitLab works the same way. Two things to know
 
 | | |
 |---|---|
-| The skill | `~/.claude/skills/html/` — `reviewdoc.py`, `live.py`, `SKILL.md`, `example.src.html` |
+| The skill | `~/.claude/skills/html/` — `reviewdoc.py`, `live.py`, `SKILL.md`, `example.src.html`, `test_routes.py` |
 | Your source | `<name>.src.html` in the repo you are working in, or its `docs/` |
 | The document | next to the source, `<name>.html`, unless `-o` says otherwise |
 | Exported notes | wherever you save them; the doc's own folder is best |
@@ -182,7 +218,10 @@ button under 900px, so it is usable on a phone. The **⇥** button in the panel 
 hides it on a desktop too, dropping the right gutter so the document centres on the
 full window; the floating **Review** button brings it back, and the choice is
 remembered per document in `localStorage`. Clicking a thread jumps to its mark;
-clicking a mark opens its thread. Resolved threads dim and fold. Printing hides the
+clicking a mark opens its thread. Resolved threads fold behind a dashed outline. An
+open thread where Claude spoke last carries a **Claude replied** badge: it is your
+turn. The Notes tab and the floating button both count open threads. **+ General
+note** above the list files a note that is not tied to any text. Printing hides the
 whole comment layer.
 
 Selecting text offers three buttons. **🖍 Highlight** just marks the passage — amber
@@ -191,6 +230,12 @@ selected word, nothing to type. **💬 Note** opens the tagged comment editor; a
 passage gets the blue underline instead. The panel has a tab for each, with a
 **Show open only** checkbox on the Notes tab. A highlight can be promoted to a note
 later from its card.
+
+Everything works from the keyboard. Select with Shift and the arrow keys and the bar
+appears; **H**, **C** and **N** press its buttons. Tab reaches every marked passage
+and every card; Enter on one jumps to the other. **⌘↩** saves a note, Escape closes
+whatever is on top. Dark mode puts dark text on the bright buttons, and motion follows
+the system's Reduce Motion setting.
 
 Notes are listed **newest activity first** — Claude's freshest answers and anything
 you just wrote sit at the top — rather than grouped by section. Each card still names

@@ -1,6 +1,6 @@
 <h1>How the review loop works</h1>
 <p class="sub">A worked example that also exercises everything the source format supports. Copy it, delete the prose, keep the shapes.</p>
-<p class="meta">html skill example · stdlib only · 2026-09-23</p>
+<p class="meta">html skill example · stdlib only · 2026-10-20</p>
 
 <p class="lede">Everything you need is in this one file. It is written the way a review
 document should be written: the answer first, in plain language, before any of the
@@ -8,9 +8,10 @@ detail.</p>
 
 <h2>The shape of the thing</h2>
 
-<p>A review document is a single HTML file. There is no server, no build step on the
-reader's side and no network. You open it by double-clicking it, you select sentences
-you want to argue with, and your notes travel back to Claude as one small JSON file.</p>
+<p>A review document is a single HTML file. There is no build step on the reader's
+side and no network. You select sentences you want to argue with, and your notes
+travel back to Claude: saved into the file as you type while Claude Code is running,
+or as one small JSON file when the page is opened on its own.</p>
 
 <div class="analogy">
   <p>Think of it as a printed draft with a red pen and a pile of sticky notes. The
@@ -25,21 +26,22 @@ you want to argue with, and your notes travel back to Claude as one small JSON f
   entirely, the note is kept and labelled <b>Unanchored</b> rather than dropped.</p>
 </div>
 
-<div class="flag warn" data-pill="one manual step">
-  <h3>You have to click Export yourself</h3>
-  <p>A page opened over <code>file://</code> cannot write to your disk on its own, and
-  it cannot call out to a local process. So the loop has one human step: press
-  <b>Export notes for Claude</b>, which saves a JSON file.</p>
+<div class="flag warn" data-pill="offline only">
+  <h3>Opened on its own, you click Export yourself</h3>
+  <p>A page opened over <code>file://</code> cannot write to your disk on its own. Live,
+  a small local server does the saving and <b>Send to Claude</b> wakes the session.
+  Offline, the loop has one human step: press <b>Export notes for Claude</b>, which
+  saves a JSON file.</p>
 </div>
 
 <h2>The loop, end to end</h2>
 
 <ol class="steps">
-  <li>Claude writes <code>plan.src.html</code> and runs <code>reviewdoc.py build</code>.</li>
-  <li>You open <code>plan.html</code>, select text, and add notes. They are held in this browser.</li>
-  <li>You press <b>Export notes for Claude</b> and save the JSON next to the document.</li>
-  <li>Claude runs <code>import</code>, then <code>list</code>, then <code>reply</code> on each thread.</li>
-  <li>Claude runs <code>build</code> again. You reload and read the answers under your comments.</li>
+  <li>Claude writes <code>plan.src.html</code> and runs <code>reviewdoc.py build --open</code>.</li>
+  <li>You select text and add notes. Live, each one lands in <code>plan.html</code> as you type.</li>
+  <li>You press <b>Send to Claude</b>. Offline, you press <b>Export notes for Claude</b> instead.</li>
+  <li>Claude runs <code>list</code>, then <code>reply</code> on each thread, after an <code>import</code> if you exported.</li>
+  <li>The answers appear under your comments: live within seconds, offline after a reload.</li>
 </ol>
 
 <p>The panel on the right is the whole interface. Each of your notes becomes a thread,
@@ -61,8 +63,8 @@ word processor.</p>
   <text x="260" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">in the browser</text>
 
   <rect x="380" y="60" width="140" height="56" rx="11" fill="var(--card)" stroke="var(--warn)"/>
-  <text x="450" y="84" text-anchor="middle" fill="var(--warn)" font-size="13" font-weight="650">export JSON</text>
-  <text x="450" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">the one manual step</text>
+  <text x="450" y="84" text-anchor="middle" fill="var(--warn)" font-size="13" font-weight="650">send</text>
+  <text x="450" y="101" text-anchor="middle" fill="var(--dim)" font-size="11">or export, offline</text>
 
   <rect x="565" y="60" width="125" height="56" rx="11" fill="var(--card)" stroke="var(--good)"/>
   <text x="627" y="84" text-anchor="middle" fill="var(--good)" font-size="13" font-weight="650">reply</text>
@@ -147,8 +149,8 @@ vocabulary with a line number, so a slip is never silent.</p>
 
 <table>
   <tr><th>Decision</th><th>Recommendation</th></tr>
-  <tr><td>Keep the export step manual</td><td><code>yes</code>: no server means nothing to install or trust</td></tr>
+  <tr><td>Keep offline export as a fallback</td><td><code>yes</code>: the page still works with no server running</td></tr>
   <tr><td>Store notes inside the HTML</td><td><code>yes</code>: one file to move around, and rebuilds keep them</td></tr>
 </table>
 
-<p>Mark this page up and export the notes when you are done.</p>
+<p>Mark this page up and press <b>Send to Claude</b>, or export the notes, when you are done.</p>
