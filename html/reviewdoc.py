@@ -2338,7 +2338,7 @@ JS = r"""
 
 PANEL = """
 <div id="rd-bar" role="toolbar" aria-label="Mark up the selection">
-  <button type="button" data-hl aria-keyshortcuts="H">&#128396; Highlight</button>
+  <button type="button" data-hl aria-keyshortcuts="H" aria-label="Highlight" title="Highlight">&#128396;</button>
   <button type="button" data-clarify aria-keyshortcuts="C">&#128269; Clarify</button>
   <button type="button" data-note aria-keyshortcuts="N">&#128172; Note</button>
 </div>
