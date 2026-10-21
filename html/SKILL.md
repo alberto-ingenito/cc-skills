@@ -173,27 +173,18 @@ the answer belonged in the document.
 because there is no question in it. Every command exits non-zero with a one-line
 error on bad input.
 
-A command's `<doc.html>` may also be the bare file name of a registered
-document (`list plan.html`, or just `plan`), from any folder. It prints the full
-path it used on stderr. A name that two registered documents share is refused:
-pass the path.
-
 ### The live page's address
 
-The server answers for a document at three addresses. All three serve the same
-page, with the same id, the same notes and the same live features:
+The server answers for a document at two addresses. Both serve the same page,
+with the same id, the same notes and the same live features:
 
 | Address | Example |
 |---|---|
-| by file name | `http://127.0.0.1:47700/f/plan.html` (`plan` and `plan.src.html` also work) |
 | by path | `http://127.0.0.1:47700/p/Users/me/repo/docs/plan.html` (or `/p/~/repo/docs/plan.html`) |
 | by id | `http://127.0.0.1:47700/d/<id>/` |
 
-- `open` and `build --open` print the name address when no other registered
-  document has that name, the path address otherwise. Give the user the
-  address they print, not one you built yourself.
-- If two registered documents share a name, the name address shows a short page
-  listing both. It never picks one.
+- `open` and `build --open` print the path address. Give the user the address
+  they print, not one you built yourself.
 - The path address works for any reviewdoc build, registered or not, so the
   user can open one by typing its path. Anything else is a plain 404.
 - Spaces in a path are `%20`. The browser does that when the user types a space.

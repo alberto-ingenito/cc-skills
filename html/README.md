@@ -48,11 +48,11 @@ and the page's **↓ Markdown** button hands the reader the same text.
 The same file works two ways.
 
 **Live.** A small server (`live.py`, stdlib only) serves the page on
-`http://127.0.0.1:<port>/`, by file name, by path or by id (see "Addresses"). Every
-note goes into the HTML file on disk as you write it, so there is no Export. Claude's
-replies appear in the open page within seconds, so there is no reload. **Send to
-Claude** wakes the Claude session that is waiting on the page. The panel's status
-line says which mode you are in.
+`http://127.0.0.1:<port>/`, by path or by id (see "Addresses"). Every note goes into
+the HTML file on disk as you write it, so there is no Export. Claude's replies appear
+in the open page within seconds, so there is no reload. **Send to Claude** wakes the
+Claude session that is waiting on the page. The panel's status line says which mode
+you are in.
 
 **Offline.** The file opened on its own, from disk or an email. Notes stay in the
 browser until you press **Export notes for Claude**, which saves a JSON file; Claude
@@ -66,25 +66,23 @@ port is stable, so the browser finds those notes again.
 
 ### Addresses
 
-Each document has three addresses on the server. All three serve the same page, with
-the same id, the same notes and the same live features. Drafts are kept per id, so
-they follow the document whichever address you use.
+Each document has two addresses on the server. Both serve the same page, with the
+same id, the same notes and the same live features. Drafts are kept per id, so they
+follow the document whichever address you use.
 
 | | |
 |---|---|
-| `/f/plan.html` | by file name. `/f/plan` and `/f/plan.src.html` work too |
 | `/p/Users/me/repo/docs/plan.html` | by absolute path. `/p/~/repo/docs/plan.html` works too |
 | `/d/<doc id>/` | by id, as before |
 
-- A name finds only registered documents. If two share it, you get a short page
-  that lists both with their full paths. It never picks one for you.
 - A path finds any reviewdoc build, registered or not. A build the server has not
   seen yet is registered on the spot, as `open` would do.
 - Type spaces as they are; the browser sends them as `%20`.
-- `open`, `build --open` and `wait` print the name address when the name is unique,
-  and the path address otherwise. `status` lists each document's address.
-- Commands that take `<doc.html>` also take a registered document's bare file name,
-  from any folder: `reviewdoc.py list plan.html`.
+- `open`, `build --open` and `wait` print the path address. `status` lists each
+  document's address.
+- There is no address by file name alone. Two folders often hold files with the
+  same name, and a name that pointed at one document today could point at another
+  tomorrow. A path names exactly one file.
 - A copy of a built document carries the same id. The server keeps one file per id,
   so asking for the copy by path shows a page that points at the original.
 - A server started before addresses existed knows only `/d/`. The CLI reads the
@@ -137,12 +135,12 @@ so the live page opens in your local browser.
 
 - It listens on `127.0.0.1` only, on the first free port from 47700 (`REVIEWDOC_PORT`
   moves the range).
-- It serves only reviewdoc builds. By id or name, that means documents a `build` or
-  `open` registered. By path, it means a file that carries a build's markers: the
-  doctype first, the document id in the head, and the notes block. The file must
-  end in `.html` and belong to you. Symlinks and `..` are resolved before any check.
-- Everything else under `/f/` and `/p/` gets the same plain 404, whatever the
-  reason. So the server cannot be used to learn whether a file exists.
+- It serves only reviewdoc builds. By id, that means documents a `build` or `open`
+  registered. By path, it means a file that carries a build's markers: the doctype
+  first, the document id in the head, and the notes block. The file must end in
+  `.html` and belong to you. Symlinks and `..` are resolved before any check.
+- Everything else under `/p/` gets the same plain 404, whatever the reason. So the
+  server cannot be used to learn whether a file exists.
 - Requests whose `Host` is not `127.0.0.1`/`localhost` are refused (DNS rebinding).
 - A page the server serves carries the API token, so only builds you trust should be
   served. That is why another website cannot register one for you. It may link to
@@ -153,9 +151,8 @@ so the live page opens in your local browser.
 - Every API call needs a per-user token, kept `0600` in the state directory. Only the
   pages the server serves carry it, and it rides in a custom header, which another
   site's script cannot send without a CORS preflight the server never grants.
-- Any other local user can reach the server too. They could open a registered
-  document by its name, or any build of yours by its path. On a single-user Mac
-  this does not matter.
+- Any other local user can reach the server too. They could open any build of yours
+  by its path. On a single-user Mac this does not matter.
 
 ## Sharing it with others
 

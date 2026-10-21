@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Checks the live server's three addresses for one document: /d/<id>/,
-/f/<name> and /p/<path>, and the refusals around them.
+"""Checks the live server's two addresses for one document, /d/<id>/ and
+/p/<path>, and the refusals around them.
 
 Self-contained and safe to run next to a live review: the documents are built
 in a temp folder, the server state lives in another (REVIEWDOC_STATE), and
@@ -205,28 +205,19 @@ class Routes(unittest.TestCase):
         status, _h, _b = get("/d/0123456789abcdef/")
         self.assertEqual(status, 404)
 
-    # ---- by name ----
+    # ---- no address by file name alone ----
 
-    def test_name_route(self):
-        _path, docid = DOCS["C"]
-        for name in ("lean%20model%20review.html", "lean%20model%20review",
-                     "lean%20model%20review.src.html"):
-            self.assertPage("/f/" + name, docid)
-        self.assertNotFound("/f/no-such-document.html")
-        self.assertNotFound("/f/lean model review.html".replace(" ", "%2520"))  # double-encoded
+    def test_a_name_is_not_an_address(self):
+        for url in ("/f/lean%20model%20review.html", "/f/lean%20model%20review",
+                    "/f/plan.html", "/f/unreg.html"):
+            self.assertNotFound(url)
 
-    def test_ambiguous_name_lists_candidates(self):
-        status, h, body = get("/f/plan.html")
-        self.assertEqual(status, 300)
-        self.assertTrue(h["content-type"].startswith("text/html"))
-        text = body.decode("utf-8")
-        self.assertIsNone(rd_live(body), "a chooser, not a document")
-        for key in ("A", "B"):
-            path, docid = DOCS[key]
-            self.assertIn(rd.esc(path), text)
-            link = rd.esc(p_url(path))
-            self.assertIn('href="%s"' % link, text)
-            self.assertPage(p_url(path), docid)          # each candidate link works
+    def test_same_name_in_two_folders(self):
+        (a_path, a_id), (b_path, b_id) = DOCS["A"], DOCS["B"]
+        self.assertEqual(os.path.basename(a_path), os.path.basename(b_path))
+        self.assertNotEqual(a_id, b_id)
+        self.assertPage(p_url(a_path), a_id)
+        self.assertPage(p_url(b_path), b_id)
 
     # ---- by path ----
 
@@ -247,10 +238,8 @@ class Routes(unittest.TestCase):
     def test_unregistered_valid_path_registers(self):
         path, docid = DOCS["D"]
         self.assertIsNone(live.registered(docid))
-        self.assertNotFound("/f/unreg.html")         # names only find registered ones
         self.assertPage(p_url(path), docid)
         self.assertEqual(live.registered(docid), os.path.realpath(path))
-        self.assertPage("/f/unreg.html", docid)
         self.assertPage("/d/%s/" % docid, docid)
 
     def test_not_a_reviewdoc_is_a_plain_404(self):
@@ -283,8 +272,6 @@ class Routes(unittest.TestCase):
         self.assertNotFound(p_url(alpha) + "/../eps/plain.html")
         # `..` that lands on a genuine build is just another spelling of its path
         self.assertPage(p_url(alpha) + "/../beta%20dir/plan.html", DOCS["B"][1])
-        self.assertNotFound("/f/..%2f..%2fetc%2fpasswd")
-        self.assertNotFound("/f/..")
 
     def test_percent_encoding(self):
         path, docid = DOCS["C"]
@@ -294,14 +281,13 @@ class Routes(unittest.TestCase):
         self.assertNotFound(p_url(path) + "%00")
         self.assertNotFound(p_url(path)[:-5] + "%00.html")
         self.assertNotFound(p_url(path)[:-5] + "%ff.html")      # not UTF-8
-        self.assertNotFound("/f/%ff.html")
 
     def test_refusals_look_alike(self):
         """Missing, unreadable-as-build and unknown-route answers are identical."""
         eps = os.path.join(TMP, "eps")
         seen = set()
         for path in (p_url(os.path.join(eps, "plain.html")), p_url(os.path.join(eps, "nope.html")),
-                     "/p/etc/passwd", "/f/nope.html", "/nowhere"):
+                     "/p/etc/passwd", "/f/plan.html", "/nowhere"):
             status, h, body = get(path)
             seen.add((status, h["content-type"], h["content-length"], body))
         self.assertEqual(len(seen), 1, seen)
@@ -320,15 +306,12 @@ class Routes(unittest.TestCase):
         path, docid = DOCS["C"]
         xs = {"Sec-Fetch-Site": "cross-site"}
         self.assertPage(p_url(path), docid, **dict(xs, **{"Sec-Fetch-Dest": "document"}))
-        self.assertPage("/f/lean%20model%20review.html", docid,
-                        **dict(xs, **{"Sec-Fetch-Dest": "iframe"}))
+        self.assertPage(p_url(path), docid, **dict(xs, **{"Sec-Fetch-Dest": "iframe"}))
         for dest in ("image", "script", "object", "empty", "style"):
             self.assertNotFound(p_url(path), **dict(xs, **{"Sec-Fetch-Dest": dest}))
-            self.assertNotFound("/f/lean%20model%20review.html",
-                                **{"Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": dest})
+            self.assertNotFound(p_url(path), **{"Sec-Fetch-Site": "same-site", "Sec-Fetch-Dest": dest})
         # our own pages may fetch them, and a typed URL is not "another site"
-        self.assertPage("/f/lean%20model%20review.html", docid,
-                        **{"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "empty"})
+        self.assertPage(p_url(path), docid, **{"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "empty"})
         self.assertPage(p_url(path), docid, **{"Sec-Fetch-Site": "none", "Sec-Fetch-Dest": "document"})
         # no registration on another site's say-so
         epath, eid = DOCS["E"]
@@ -336,8 +319,8 @@ class Routes(unittest.TestCase):
         self.assertIsNone(live.registered(eid))
 
     def test_dns_rebinding_host_is_refused(self):
-        path, _docid = DOCS["C"]
-        for url in (p_url(path), "/f/lean%20model%20review.html", "/f/plan.html"):
+        path, docid = DOCS["C"]
+        for url in (p_url(path), "/d/%s/" % docid):
             status, _h, _b = get(url, Host="rebind.example:47700")
             self.assertEqual(status, 403, url)
 
@@ -347,7 +330,7 @@ class Routes(unittest.TestCase):
         path, docid = DOCS["C"]
         tok = live.token()
         api = {"X-Reviewdoc-Token": tok}
-        urls = ("/d/%s/" % docid, "/f/lean%20model%20review.html", p_url(path))
+        urls = ("/d/%s/" % docid, p_url(path))
         pages = [self.assertPage(u, docid) for u in urls]
         self.assertEqual(len(set(pages)), 1, "byte-identical page, same RD_LIVE")
 
@@ -362,10 +345,9 @@ class Routes(unittest.TestCase):
         for u in urls:
             self.assertIn(b'"uroute1"', get(u)[2])
 
-        # Claude replies from the CLI, by bare file name: the page's poll sees it
-        code, _o, err = quiet(rd.main, ["reply", "lean model review.html", "uroute1", "Because."])
+        # Claude replies from the CLI: the page's poll sees it
+        code, _o, err = quiet(rd.main, ["reply", path, "uroute1", "Because."])
         self.assertEqual(code, 0, err)
-        self.assertIn(path, err)
         st = json.loads(WIRE.request("GET", "/api/d/%s/state" % docid, api)[2])
         replies = [r for n in st["notes"] if n["id"] == "uroute1" for r in n["replies"]]
         self.assertEqual([(r["author"], r["body"]) for r in replies], [("claude", "Because.")])
@@ -375,7 +357,7 @@ class Routes(unittest.TestCase):
         build("gamma/lifecycle analysis/html/lean model review", "The Lean model", "Rewritten.")
         st = json.loads(WIRE.request("GET", "/api/d/%s/state" % docid, api)[2])
         self.assertNotEqual(st["content"], before)
-        self.assertEqual(rd_live(get(urls[2])[2])["content"], st["content"])
+        self.assertEqual(rd_live(get(urls[0])[2])["content"], st["content"])
         self.assertIn("uroute1", [n["id"] for n in st["notes"]], "the note survived the rebuild")
 
         # Send to Claude
@@ -385,7 +367,7 @@ class Routes(unittest.TestCase):
         self.assertEqual(live.sent_seq(docid), seq + 1)
 
     def test_head(self):
-        status, h, body = WIRE.request("HEAD", "/f/lean%20model%20review.html")
+        status, h, body = WIRE.request("HEAD", p_url(DOCS["C"][0]))
         self.assertEqual((status, body), (200, b""))
         self.assertGreater(int(h["content-length"]), 1000)
 
@@ -400,18 +382,15 @@ class Cli(unittest.TestCase):
         with contextlib.suppress(OSError):
             os.remove(live.spath("daemon.json"))
 
-    def test_friendly_url(self):
+    def test_path_url(self):
         self.daemon(2)
         base = "http://127.0.0.1:%d" % WIRE.port
-        c_path, c_id = DOCS["C"]
-        self.assertEqual(live.url_for(c_id), base + "/f/lean%20model%20review.html")
-        for key in ("A", "B"):                       # plan.html is taken twice: by path
+        for key in ("A", "B", "C"):                  # A and B are both plan.html
             path, docid = DOCS[key]
-            self.assertEqual(live.url_for(docid), base + p_url(path))
-        for key in ("A", "B", "C"):
-            url = live.url_for(DOCS[key][1])
+            url = live.url_for(docid)
+            self.assertEqual(url, base + p_url(path))
             status, _h, body = get(url[len(base):])
-            self.assertEqual((status, rd.doc_id(body.decode("utf-8"))), (200, DOCS[key][1]))
+            self.assertEqual((status, rd.doc_id(body.decode("utf-8"))), (200, docid))
 
     def test_old_server_gets_id_urls(self):
         self.daemon(1)
@@ -421,20 +400,14 @@ class Cli(unittest.TestCase):
     def test_status_prints_them(self):
         self.daemon(2)
         code, out, _err = quiet(live.cmd_status, None)
-        self.assertIn("/f/lean%20model%20review.html", out)
         self.assertIn(p_url(DOCS["A"][0]), out)
+        self.assertIn(p_url(DOCS["C"][0]), out)
 
-    def test_bare_name(self):
-        code, out, err = quiet(rd.main, ["list", "lean model review"])
-        self.assertEqual(code, 0, err)
-        self.assertIn(DOCS["C"][0], err)
-        code, out, err = quiet(rd.main, ["list", "plan.html"])
-        self.assertNotEqual(code, 0)
-        self.assertIn(DOCS["A"][0], err)
-        self.assertIn(DOCS["B"][0], err)
-        code, out, err = quiet(rd.main, ["list", "never-built.html"])
-        self.assertNotEqual(code, 0)
-        self.assertIn("cannot read never-built.html", err)
+    def test_a_bare_name_is_not_looked_up(self):
+        for name in ("lean model review", "plan.html"):     # registered, but not in this folder
+            code, _out, err = quiet(rd.main, ["list", name])
+            self.assertNotEqual(code, 0)
+            self.assertIn("cannot read %s" % name, err)
 
 
 if __name__ == "__main__":

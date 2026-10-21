@@ -2714,26 +2714,6 @@ def cmd_resolve(a):
     die(READER_CLOSES)
 
 
-def doc_arg(arg):
-    """A command's <doc.html>: a path, or else the bare file name of a
-    registered document ("plan.html" or "plan"), so it works from any folder.
-    A name two registered documents share is refused, never guessed."""
-    if os.path.exists(arg) or "/" in arg:
-        return arg
-    try:
-        import live
-    except ImportError:
-        return arg
-    hits = live.by_name(arg)
-    if len(hits) > 1:
-        die("%s names %d registered documents; pass the path:\n  %s"
-            % (arg, len(hits), "\n  ".join(h[1] for h in hits)))
-    if hits:
-        sys.stderr.write("reviewdoc: %s is %s\n" % (arg, hits[0][1]))
-        return hits[0][1]
-    return arg
-
-
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     # `reply` takes a free-text positional, so argparse cannot tell where the
@@ -2834,8 +2814,6 @@ def main(argv=None):
     if a.cmd == "reply":
         a.resolve = "--resolve" in flags
         a.all_open = "--all-open" in flags
-    if getattr(a, "doc", None):
-        a.doc = doc_arg(a.doc)
     a.fn(a)
     return 0
 

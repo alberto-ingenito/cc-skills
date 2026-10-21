@@ -38,9 +38,8 @@ State directory layout (all per user):
   waiters/<id>/<pid>     heartbeat of a `wait` running for that document
   locks/                 per-document write locks
 
-A document has three addresses, all serving the same page with the same id:
+A document has two addresses, both serving the same page with the same id:
   /d/<id>/               the id; what the offline copy's "Open it live" uses
-  /f/<name>              its file name, when no other registered document has it
   /p/<absolute path>     its path, which also registers a build nobody has yet
 """
 
@@ -66,7 +65,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 import reviewdoc as rd
 
-VERSION = 2         # 2: /f/<name> and /p/<path>. The CLI prints them only to a server that has them
+VERSION = 2         # 2: /p/<path>. The CLI prints it only to a server that has it
 GRACE = 90          # seconds the server outlives the last Claude session
 HEARTBEAT = 15      # a `wait` counts as waiting if it touched its file this recently
 MAX_BODY = 8 << 20
@@ -154,7 +153,7 @@ def registered(docid):
 
 
 # --------------------------------------------------------------------------
-# a document by its file name or its path, besides its id
+# a document by its path, besides its id
 # --------------------------------------------------------------------------
 
 class Conflict(Exception):
@@ -164,33 +163,6 @@ class Conflict(Exception):
     def __init__(self, docid, path, copy):
         Exception.__init__(self, docid)
         self.docid, self.path, self.copy = docid, path, copy
-
-
-def registry():
-    """-> [(docid, record)] for every registration, live or stale."""
-    out = []
-    for f in glob.glob(os.path.join(rd.state_dir("docs"), "*.json")):
-        rec = read_json(f)
-        if isinstance(rec, dict) and isinstance(rec.get("path"), str):
-            out.append((os.path.basename(f)[:-5], rec))
-    return out
-
-
-def by_name(name):
-    """-> [(docid, path, title)] of the registered documents whose file is
-    called `name`. "plan.html", "plan" and the source's "plan.src.html" all
-    mean plan.html. Copies of one file count once."""
-    want = {name, re.sub(r"(\.src)?\.html$", "", name) + ".html"}
-    hits, seen = [], set()
-    for docid, rec in registry():
-        if os.path.basename(rec["path"]) not in want:
-            continue
-        path = registered(docid)        # still there, and still this document
-        real = path and os.path.realpath(path)
-        if real and real not in seen:
-            seen.add(real)
-            hits.append((docid, path, rec.get("title") or ""))
-    return sorted(hits, key=lambda h: h[1])
 
 
 def output_id(path):
@@ -269,15 +241,11 @@ def path_route(path):
 
 
 def page_path(docid):
-    """-> the address to give a person for a registered document: /f/<name>
-    when no other registered document has that name, else /p/<path>, else
-    /d/<id>/. Each is checked to lead back to this document before it is used."""
+    """-> the address to give a person for a registered document: /p/<path>,
+    once it is checked to lead back to this document, else /d/<id>/."""
     path = registered(docid)
     if not path:
         return None
-    name = os.path.basename(path)
-    if [h[0] for h in by_name(name)] == [docid]:
-        return "/f/" + quote(name)
     route = path_route(path)
     try:
         if by_path(route[3:], may_register=False) == docid:
@@ -292,7 +260,7 @@ def url_for(docid):
     if not (d and registered(docid)):
         return None
     if int(d.get("version") or 1) < 2:
-        # a server started before /f/ and /p/ existed: it knows only the id
+        # a server started before /p/ existed: it knows only the id
         return "http://127.0.0.1:%d/d/%s/" % (d["port"], docid)
     return "http://127.0.0.1:%d%s" % (d["port"], page_path(docid))
 
@@ -462,28 +430,15 @@ NOTE_PAGE = """<!DOCTYPE html>
 <style>
   body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:760px;
     margin:56px auto;padding:0 22px;color:#1d1d1f;background:#fbfbfd}
-  h1{font-size:22px;margin:0 0 6px} p{color:#555} a{color:#0a66d8} li{margin:14px 0}
-  code,.path{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all}
-  .title{color:#666;font-size:14px}
-  @media(prefers-color-scheme:dark){body{color:#e8e8ed;background:#1c1c1e}p,.title{color:#a1a1a6}
+  h1{font-size:22px;margin:0 0 6px} p{color:#555} a{color:#0a66d8}
+  .path{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all}
+  @media(prefers-color-scheme:dark){body{color:#e8e8ed;background:#1c1c1e}p{color:#a1a1a6}
     a{color:#6cb4ff}}
 </style></head>
 <body>
 %s
 </body></html>
 """
-
-
-def choose_page(name, hits):
-    """Several registered documents share this name: list them, never guess."""
-    rows = "".join(
-        '<li><a class="path" href="%s">%s</a><br><span class="title">%s</span></li>'
-        % (rd.esc(path_route(path)), rd.esc(path), rd.esc(title))
-        for _docid, path, title in hits)
-    body = ("<h1>%d documents are called <code>%s</code></h1>\n"
-            "<p>Pick one. Each link opens that file by its full path.</p>\n<ul>%s</ul>"
-            % (len(hits), rd.esc(name), rows))
-    return NOTE_PAGE % (rd.esc("Which %s?" % name), body)
 
 
 def conflict_page(c):
@@ -555,10 +510,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.headers.get("Sec-Fetch-Dest", "document") not in ("document", "iframe", "frame")
 
     def _nope(self):
-        # one answer for every refusal on /f/ and /p/: missing, a folder, not a
-        # build, owned by someone else, a symlink to any of those, a malformed
-        # URL. It is also the answer for an unknown route, so none of them can
-        # be told apart.
+        # one answer for every refusal on /p/: missing, a folder, not a build,
+        # owned by someone else, a symlink to any of those, a malformed URL. It
+        # is also the answer for an unknown route, so none of them can be told
+        # apart.
         return self._send(404, {"error": "not found"})
 
     def _page(self, docid):
@@ -567,21 +522,6 @@ class Handler(BaseHTTPRequestHandler):
         except KeyError:
             return self._nope()
         return self._send(200, html, "text/html; charset=utf-8",
-                          extra=[("Referrer-Policy", "no-referrer")])
-
-    def _by_name(self, raw):
-        if self._foreign() and self._embedded():
-            return self._nope()
-        try:
-            name = unquote(raw, errors="strict")
-        except UnicodeDecodeError:
-            return self._nope()
-        hits = by_name(name)
-        if not hits:
-            return self._nope()
-        if len(hits) == 1:
-            return self._page(hits[0][0])
-        return self._send(300, choose_page(name, hits), "text/html; charset=utf-8",
                           extra=[("Referrer-Policy", "no-referrer")])
 
     def _by_path(self, raw):
@@ -616,11 +556,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(301, b"", extra=[("Location", path + "/")])
                 return self._send(200, self.docs.page(m.group(1)), "text/html; charset=utf-8",
                                   extra=[("Referrer-Policy", "no-referrer")])
-            # the same page by file name or by path; the page itself still
-            # talks to /api/d/<id>/, so it behaves exactly as under /d/<id>/
-            m = re.fullmatch(r"/f/([^/]+)", path)
-            if method == "GET" and m:
-                return self._by_name(m.group(1))
+            # the same page by path; the page itself still talks to
+            # /api/d/<id>/, so it behaves exactly as under /d/<id>/
             m = re.fullmatch(r"/p/(.+)", path)
             if method == "GET" and m:
                 return self._by_path(m.group(1))
